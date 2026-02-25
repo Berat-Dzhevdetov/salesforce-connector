@@ -18,7 +18,7 @@ A TypeScript ORM library for Salesforce with an ActiveRecord-style interface. Th
 ## Installation
 
 ```bash
-npm install fastify-salesforce-connect
+npm install javascript-salesforce-connector
 ```
 
 For local development, you can link the package:
@@ -30,7 +30,7 @@ npm run build
 npm link
 
 # In your project directory
-npm link fastify-salesforce-connect
+npm link javascript-salesforce-connector
 ```
 
 ## Configuration
@@ -38,7 +38,7 @@ npm link fastify-salesforce-connect
 Before using any models, you must initialize the Salesforce configuration. This configuration is global and used by all models throughout your application.
 
 ```typescript
-import { SalesforceConfig } from 'fastify-salesforce-connect';
+import { SalesforceConfig } from 'javascript-salesforce-connector';
 
 SalesforceConfig.initialize({
   instanceUrl: 'https://your-instance.salesforce.com',
@@ -103,7 +103,7 @@ async function authenticateWithSalesforce(): Promise<string> {
 // Initialize configuration
 SalesforceConfig.initialize({
   instanceUrl: process.env.SF_INSTANCE_URL,
-  apiVersion: '59.0',
+  apiVersion: 'v59.0',
   onTokenExpired: authenticateWithSalesforce
 });
 
@@ -119,7 +119,7 @@ To create a model, extend the `Model` class and define your Salesforce object's 
 ### Basic Model Structure
 
 ```typescript
-import { Model } from 'fastify-salesforce-connect';
+import { Model } from 'javascript-salesforce-connector';
 
 // Define the data interface for type safety
 interface AccountData {
@@ -649,12 +649,12 @@ const revenue: number | undefined = account.AnnualRevenue;
 ### Complete CRUD Application
 
 ```typescript
-import { SalesforceConfig, Model } from 'fastify-salesforce-connect';
+import { SalesforceConfig, Model } from 'javascript-salesforce-connector';
 
 // Configure Salesforce
 SalesforceConfig.initialize({
   instanceUrl: process.env.SF_INSTANCE_URL!,
-  apiVersion: '59.0',
+  apiVersion: 'v59.0',
   onTokenExpired: async () => {
     // Implement your token refresh logic
     return await refreshToken();
