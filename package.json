@@ -1,0 +1,49 @@
+{
+  "name": "salesforce-connector",
+  "version": "1.0.0",
+  "description": "Salesforce ORM-like module with ActiveRecord-style interface",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "salesforce",
+    "orm",
+    "activerecord",
+    "fastify",
+    "typescript",
+    "rest-api",
+    "soql",
+    "query-builder"
+  ],
+  "author": "Berat Yuseinov <berat.yuseinov@abv.bg>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Berat-Dzhevdetov/salesforce-connector.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Berat-Dzhevdetov/salesforce-connector/issues"
+  },
+  "homepage": "https://github.com/Berat-Dzhevdetov/salesforce-connector#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "axios": "^1.6.5"
+  }
+}
