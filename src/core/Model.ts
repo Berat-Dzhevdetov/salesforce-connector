@@ -2,6 +2,8 @@ import { QueryBuilder } from './QueryBuilder';
 import { SalesforceClient } from './SalesforceClient';
 import { SalesforceConfig } from './SalesforceConfig';
 import { ModelData } from '../types';
+import { RelationshipProxy } from './RelationshipProxy';
+import { HasManyProxy } from './HasManyProxy';
 
 /**
  * Base Model class for Salesforce objects
@@ -326,5 +328,208 @@ export class Model<T extends ModelData = ModelData> {
    */
   public toJSON(): Partial<T> {
     return this.getData();
+  }
+
+  /**
+   * Define a belongs-to relationship (lookup/master-detail)
+   * Returns a proxy that lazy loads the related record when accessed
+   *
+   * @param relationshipName - The name of the relationship field (e.g., 'Member', 'Owner')
+   * @param foreignKeyField - The ID field that stores the reference (e.g., 'MemberId', 'OwnerId')
+   * @param relatedModelClass - The model class to load (e.g., User)
+   * @returns A proxy object that loads the related record on first access
+   *
+   * @example
+   * // In your model class:
+   * get Member(): User | null {
+   *   return this.belongsTo('Member', 'MemberId', User);
+   * }
+   *
+   * // Usage:
+   * const journal = await TransactionJournal.find('a001xxx');
+   * // Loads Member on first access:
+   * console.log(journal.Member.Name); // ← Error: needs to be loaded first
+   *
+   * // Proper usage - load manually:
+   * await journal.loadMember();
+   * console.log(journal.Member.Name); // ← Works!
+   *
+   * // Or eager load in query:
+   * const journal2 = await TransactionJournal
+   *   .select('Id', 'Name', 'Member.Name', 'Member.Email')
+   *   .first();
+   * console.log(journal2.Member.Name); // ← Works! Already loaded
+   */
+  protected belongsTo<R extends ModelData>(
+    relationshipName: string,
+    foreignKeyField: string,
+    relatedModelClass: new (data?: any) => Model<R>
+  ): R | null {
+    const proxyKey = `__proxy_${relationshipName}`;
+
+    // Check if proxy already exists and return its data
+    if ((this as any)[proxyKey]) {
+      const existingProxy = (this as any)[proxyKey] as RelationshipProxy<R>;
+      return existingProxy.createProxy();
+    }
+
+    // Check if the relationship data was already loaded from a query
+    const preloadedData = this.get(relationshipName as keyof T) as Partial<R> | undefined;
+
+    // Create a new relationship proxy
+    const proxy = new RelationshipProxy<R>(
+      this,
+      relationshipName,
+      foreignKeyField,
+      relatedModelClass,
+      preloadedData
+    );
+
+    // Store the proxy for later access
+    (this as any)[proxyKey] = proxy;
+
+    return proxy.createProxy();
+  }
+
+  /**
+   * Manually load a relationship
+   * Use this to explicitly load a relationship before accessing its properties
+   *
+   * @param relationshipName - The name of the relationship to load
+   * @returns Promise that resolves when the relationship is loaded
+   *
+   * @example
+   * const journal = await TransactionJournal.find('a001xxx');
+   * await journal.loadRelationship('Member');
+   * console.log(journal.Member.Name); // Now safe to access
+   */
+  protected async loadRelationship(relationshipName: string): Promise<void> {
+    const proxyKey = `__proxy_${relationshipName}`;
+
+    // If proxy doesn't exist, create it by accessing the getter first
+    if (!(this as any)[proxyKey]) {
+      // Access the getter to create the proxy
+      // This assumes the relationship getter exists on the model
+      const getter = (this as any)[relationshipName];
+      if (!getter) {
+        throw new Error(
+          `Relationship '${relationshipName}' not found. Make sure you've defined a getter for it in your model.`
+        );
+      }
+    }
+
+    const proxy = (this as any)[proxyKey] as RelationshipProxy<any> | undefined;
+
+    if (!proxy) {
+      throw new Error(
+        `Relationship '${relationshipName}' not found. Make sure you've defined it using belongsTo() in your model.`
+      );
+    }
+
+    await proxy.load();
+  }
+
+  /**
+   * Define a has-many relationship (child relationship / related list)
+   * Returns a proxy that lazy loads the related records when accessed
+   *
+   * @param relationshipName - The name of the relationship (e.g., 'TransactionJournals', 'Contacts')
+   * @param foreignKeyField - The field on the related object that references this model (e.g., 'MemberId__c', 'AccountId')
+   * @param relatedModelClass - The model class to load (e.g., TransactionJournal, Contact)
+   * @param salesforceRelationshipName - Optional: The Salesforce API name for subqueries (e.g., 'TransactionJournals__r')
+   * @returns A proxy array that loads the related records on first access
+   *
+   * @example
+   * // In your User model:
+   * get TransactionJournals(): TransactionJournalData[] {
+   *   return this.hasMany<TransactionJournalData>(
+   *     'TransactionJournals',
+   *     'MemberId__c',
+   *     TransactionJournal,
+   *     'TransactionJournals__r'
+   *   );
+   * }
+   *
+   * // Usage - Lazy Loading:
+   * const user = await User.find('005xxx');
+   * await user.loadTransactionJournals();
+   * console.log(user.TransactionJournals.length); // ← Works!
+   * console.log(user.TransactionJournals[0].Name);
+   *
+   * // Usage - Eager Loading with subquery:
+   * const users = await User
+   *   .select('Id', 'Name', '(SELECT Id, Name, TransactionAmount__c FROM TransactionJournals__r)')
+   *   .get();
+   * console.log(users[0].TransactionJournals.length); // ← Already loaded!
+   */
+  protected hasMany<R extends ModelData>(
+    relationshipName: string,
+    foreignKeyField: string,
+    relatedModelClass: new (data?: any) => Model<R>,
+    salesforceRelationshipName?: string
+  ): R[] {
+    const proxyKey = `__proxy_${relationshipName}`;
+
+    // Check if proxy already exists and return its data
+    if ((this as any)[proxyKey]) {
+      const existingProxy = (this as any)[proxyKey] as HasManyProxy<R>;
+      return existingProxy.createProxy();
+    }
+
+    // Check if the relationship data was already loaded from a subquery
+    const subqueryKey = salesforceRelationshipName || relationshipName;
+    const preloadedData = this.get(subqueryKey as keyof T) as { records: R[] } | undefined;
+
+    // Create a new has-many relationship proxy
+    const proxy = new HasManyProxy<R>(
+      this,
+      relationshipName,
+      foreignKeyField,
+      relatedModelClass,
+      preloadedData
+    );
+
+    // Store the proxy for later access
+    (this as any)[proxyKey] = proxy;
+
+    return proxy.createProxy();
+  }
+
+  /**
+   * Manually load a has-many relationship
+   * Use this to explicitly load child records before accessing them
+   *
+   * @param relationshipName - The name of the relationship to load
+   * @returns Promise that resolves when the relationship is loaded
+   *
+   * @example
+   * const user = await User.find('005xxx');
+   * await user.loadHasManyRelationship('TransactionJournals');
+   * console.log(user.TransactionJournals.length); // Now safe to access
+   */
+  protected async loadHasManyRelationship(relationshipName: string): Promise<void> {
+    const proxyKey = `__proxy_${relationshipName}`;
+
+    // If proxy doesn't exist, create it by accessing the getter first
+    if (!(this as any)[proxyKey]) {
+      // Access the getter to create the proxy
+      // This assumes the relationship getter exists on the model
+      const getter = (this as any)[relationshipName];
+      if (!getter) {
+        throw new Error(
+          `Relationship '${relationshipName}' not found. Make sure you've defined a getter for it in your model.`
+        );
+      }
+    }
+
+    const proxy = (this as any)[proxyKey] as HasManyProxy<any> | undefined;
+
+    if (!proxy) {
+      throw new Error(
+        `Relationship '${relationshipName}' not found. Make sure you've defined it using hasMany() in your model.`
+      );
+    }
+
+    await proxy.load();
   }
 }

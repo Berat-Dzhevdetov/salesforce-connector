@@ -141,7 +141,16 @@ export class QueryBuilder<T = any> {
    * Build the SOQL query string
    */
   public toSOQL(): string {
-    const fields = this.selectedFields.length > 0 ? this.selectedFields.join(', ') : '*';
+    let fields: string;
+
+    if (this.selectedFields.length > 0) {
+      fields = this.selectedFields.join(', ');
+    } else {
+      // SOQL doesn't support SELECT *, so we default to Id
+      // Models should explicitly select fields they need
+      fields = 'FIELDS(ALL)';
+      this.limitValue = this.limitValue || 200; // Default to 200 if no limit is set, to avoid large queries
+    }
 
     let query = `SELECT ${fields} FROM ${this.objectName}`;
 

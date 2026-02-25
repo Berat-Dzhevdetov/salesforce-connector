@@ -10,6 +10,7 @@ A TypeScript ORM library for Salesforce with an ActiveRecord-style interface. Th
 - [Creating Models](#creating-models)
 - [Query Operations](#query-operations)
 - [CRUD Operations](#crud-operations)
+- [Relationships and Lazy Loading](#relationships-and-lazy-loading)
 - [Base Model Methods](#base-model-methods)
 - [Error Handling](#error-handling)
 - [TypeScript Support](#typescript-support)
@@ -197,16 +198,17 @@ class Account extends Model<AccountData> {
 For custom Salesforce objects, append `__c` to the object name:
 
 ```typescript
-interface FeedbackData {
+interface ProductReviewData {
   Id?: string;
   Name?: string;
   Rating__c?: number;
-  Comments__c?: string;
-  Status__c?: string;
+  ReviewText__c?: string;
+  ProductName__c?: string;
+  ReviewerEmail__c?: string;
 }
 
-class Feedback extends Model<FeedbackData> {
-  protected static objectName = 'Feedback__c';
+class ProductReview extends Model<ProductReviewData> {
+  protected static objectName = 'ProductReview__c';
 
   get Id(): string | undefined {
     return this.get('Id');
@@ -232,23 +234,33 @@ class Feedback extends Model<FeedbackData> {
     }
   }
 
-  get Comments__c(): string | undefined {
-    return this.get('Comments__c');
+  get ReviewText__c(): string | undefined {
+    return this.get('ReviewText__c');
   }
 
-  set Comments__c(value: string | undefined) {
+  set ReviewText__c(value: string | undefined) {
     if (value !== undefined) {
-      this.set('Comments__c', value);
+      this.set('ReviewText__c', value);
     }
   }
 
-  get Status__c(): string | undefined {
-    return this.get('Status__c');
+  get ProductName__c(): string | undefined {
+    return this.get('ProductName__c');
   }
 
-  set Status__c(value: string | undefined) {
+  set ProductName__c(value: string | undefined) {
     if (value !== undefined) {
-      this.set('Status__c', value);
+      this.set('ProductName__c', value);
+    }
+  }
+
+  get ReviewerEmail__c(): string | undefined {
+    return this.get('ReviewerEmail__c');
+  }
+
+  set ReviewerEmail__c(value: string | undefined) {
+    if (value !== undefined) {
+      this.set('ReviewerEmail__c', value);
     }
   }
 }
@@ -491,6 +503,347 @@ console.log(newAccount.Id); // Now has an ID
 // Update existing record
 newAccount.Industry = 'Finance';
 await newAccount.save(); // Updates the record
+```
+
+## Relationships and Lazy Loading
+
+The ORM supports Salesforce relationships (lookups and master-detail) with both **eager loading** and **lazy loading** patterns.
+
+### ⚠️ Important Naming Guidelines
+
+**Mandatory:** Your model's getter name MUST match the Salesforce relationship name exactly, or the proxy won't find the relationship!
+
+#### For BelongsTo Relationships:
+
+| Object Type | Foreign Key Field | Salesforce Relationship Name | Your Getter Name |
+|-------------|-------------------|------------------------------|------------------|
+| **Standard** | `OwnerId` | `Owner` | `get Owner()` ✅ |
+| **Standard** | `AccountId` | `Account` | `get Account()` ✅ |
+| **Custom** | `CustomObject__c` | `CustomObject__r` | `get CustomObject__r()` ✅ |
+
+```typescript
+// ✅ CORRECT - Getter name matches Salesforce relationship name
+get Owner(): UserData | null {
+  return this.belongsTo<UserData>('Owner', 'OwnerId', User);
+  //                                ^^^^^^^ Must match getter name!
+}
+
+// ❌ WRONG - Getter name doesn't match first parameter
+get MyOwner(): UserData | null {
+  return this.belongsTo<UserData>('Owner', 'OwnerId', User);
+  //     ^^^^^^^^                  ^^^^^^^
+  //     These must match!
+}
+```
+
+#### For HasMany Relationships:
+
+| Parent Object | Child Object | Salesforce Relationship Name | Your Getter Name |
+|---------------|--------------|------------------------------|------------------|
+| **Standard** | Contact | `Contacts` | `get Contacts()` ✅ |
+| **Custom Parent** | Custom Child | `CustomChildren__r` | `get CustomChildren__r()` ✅ |
+
+```typescript
+// ✅ CORRECT - Getter name matches relationship name
+get Contacts(): ContactData[] {
+  return this.hasMany<ContactData>('Contacts', 'OwnerId', Contact, 'Contacts');
+  //                                ^^^^^^^^^ Must match getter name!
+}
+```
+
+**Rule of Thumb:**
+- The **first parameter** of `belongsTo()` or `hasMany()` MUST match your **getter name**
+- The **first parameter** MUST match the **Salesforce relationship name** you use in queries
+- For custom lookups, use `__r` suffix (e.g., `User__r`)
+
+### Defining Relationships
+
+To define a relationship in your model, use the `belongsTo()` method:
+
+```typescript
+import { Model } from 'javascript-salesforce-connector';
+import { User, UserData } from './User';
+
+interface ContactData {
+  Id?: string;
+  FirstName?: string;
+  LastName?: string;
+  OwnerId?: string;
+  Email?: string;
+
+  // Relationship field (populated when eager loaded)
+  Owner?: UserData;
+}
+
+class Contact extends Model<ContactData> {
+  protected static objectName = 'Contact';
+
+  // ... other field getters/setters ...
+
+  /**
+   * Define the Owner relationship
+   */
+  get Owner(): UserData | null {
+    return this.belongsTo<UserData>('Owner', 'OwnerId', User);
+  }
+
+  /**
+   * Helper method to manually load the Owner
+   */
+  async loadOwner(): Promise<void> {
+    await this.loadRelationship('Owner');
+  }
+}
+```
+
+### Eager Loading (Recommended for Performance)
+
+Load relationship data in the initial query - **most efficient**, uses a single SOQL query:
+
+```typescript
+// Query with relationship fields included
+const contacts = await Contact
+  .select('Id', 'FirstName', 'LastName', 'Owner.Name', 'Owner.Email')
+  .where('Email', '!=', null)
+  .get();
+
+// Owner data is already loaded - no additional queries!
+for (const contact of contacts) {
+  console.log(`Contact: ${contact.FirstName} ${contact.LastName}`);
+  console.log(`Owner: ${contact.Owner?.Name} (${contact.Owner?.Email})`);
+}
+```
+
+**Benefits:**
+- Single SOQL query (respects Salesforce governor limits)
+- Best performance
+- Can select specific fields from the related object
+
+### Lazy Loading
+
+Load relationship data on-demand when needed:
+
+```typescript
+// Find a Contact (Owner not loaded yet)
+const contact = await Contact.find('003xxx');
+
+// Explicitly load the Owner relationship
+await contact.loadOwner();
+
+// Now you can access Owner properties (all fields loaded)
+console.log(`Owner: ${contact.Owner?.Name}`);
+console.log(`Email: ${contact.Owner?.Email}`);
+console.log(`Department: ${contact.Owner?.Department}`);
+```
+
+**Important:** The load methods automatically initialize the relationship proxy, so you can call `loadOwner()` directly without accessing the getter first.
+
+**When to use:**
+- You don't always need the relationship data
+- Loading conditionally based on business logic
+- Working with a single record
+
+### Accessing Unloaded Relationships
+
+Attempting to access a relationship that hasn't been loaded will throw a clear error:
+
+```typescript
+const contact = await Contact.find('003xxx');
+
+// This will throw an error with helpful message
+try {
+  console.log(contact.Owner?.Name);
+} catch (error) {
+  // Error: Relationship 'Owner' is not loaded.
+  // Access it asynchronously using: await contact.loadOwner()
+  // or eager load it in your query: .select('Id', 'FirstName', 'Owner.Name')
+}
+```
+
+### Partial Field Loading
+
+You can load only specific fields from the relationship to optimize performance:
+
+```typescript
+// Only load Name and Email from Owner
+const contacts = await Contact
+  .select('Id', 'FirstName', 'LastName', 'Owner.Name', 'Owner.Email')
+  .get();
+
+for (const contact of contacts) {
+  console.log(contact.Owner?.Name);     // Available
+  console.log(contact.Owner?.Email);    // Available
+  console.log(contact.Owner?.Phone);    // undefined - not selected
+}
+```
+
+### Handling Null Relationships
+
+Use optional chaining to safely handle relationships that might be null:
+
+```typescript
+const contact = await Contact
+  .select('Id', 'FirstName', 'LastName', 'Owner.Name', 'Owner.Email')
+  .first();
+
+// Safe navigation
+if (contact?.Owner) {
+  console.log(`Owner: ${contact.Owner.Name}`);
+} else {
+  console.log('No owner assigned');
+}
+
+// Using optional chaining with fallback
+console.log(`Email: ${contact.Owner?.Email || 'N/A'}`);
+```
+
+### Multiple Relationships
+
+If your object has multiple lookup fields, define each relationship:
+
+```typescript
+interface OpportunityData {
+  Id?: string;
+  Name?: string;
+  AccountId?: string;
+  OwnerId?: string;
+
+  Account?: AccountData;
+  Owner?: UserData;
+}
+
+class Opportunity extends Model<OpportunityData> {
+  protected static objectName = 'Opportunity';
+
+  get Account(): AccountData | null {
+    return this.belongsTo<AccountData>('Account', 'AccountId', Account);
+  }
+
+  get Owner(): UserData | null {
+    return this.belongsTo<UserData>('Owner', 'OwnerId', User);
+  }
+
+  async loadAccount(): Promise<void> {
+    await this.loadRelationship('Account');
+  }
+
+  async loadOwner(): Promise<void> {
+    await this.loadRelationship('Owner');
+  }
+}
+
+// Query multiple relationships
+const opportunities = await Opportunity
+  .select('Id', 'Name', 'Account.Name', 'Owner.Name', 'Owner.Email')
+  .get();
+```
+
+### Best Practices
+
+1. **Prefer eager loading** when you know you'll need the relationship data
+2. **Select specific fields** instead of loading entire related objects
+3. **Use lazy loading** for conditional or single-record scenarios
+4. **Respect governor limits** - eager loading uses fewer queries
+5. **Handle null relationships** with optional chaining
+
+### Has-Many Relationships (Child Relationships)
+
+Define relationships where the parent has multiple child records:
+
+```typescript
+import { Model } from 'javascript-salesforce-connector';
+import { Contact, ContactData } from './Contact';
+
+interface UserData {
+  Id?: string;
+  Name?: string;
+  Email?: string;
+
+  // Child relationship (populated when eager loaded with subquery)
+  Contacts?: {
+    records: ContactData[];
+  };
+}
+
+class User extends Model<UserData> {
+  protected static objectName = 'User';
+
+  // ... other field getters/setters ...
+
+  /**
+   * Define the Contacts relationship (User has many Contacts)
+   */
+  get Contacts(): ContactData[] {
+    return this.hasMany<ContactData>(
+      'Contacts',           // Relationship name
+      'OwnerId',           // Foreign key on Contact
+      Contact,             // Related model class
+      'Contacts'           // Salesforce subquery name
+    );
+  }
+
+  /**
+   * Helper method to manually load Contacts
+   */
+  async loadContacts(): Promise<void> {
+    await this.loadHasManyRelationship('Contacts');
+  }
+}
+```
+
+**Eager Loading with Subquery:**
+
+```typescript
+// Query with child records included
+const users = await User
+  .select('Id', 'Name', '(SELECT Id, FirstName, LastName, Email FROM Contacts)')
+  .where('IsActive', true)
+  .get();
+
+// Contacts are already loaded!
+for (const user of users) {
+  console.log(`${user.Name} has ${user.Contacts.length} contacts`);
+
+  user.Contacts.forEach(contact => {
+    console.log(`  - ${contact.FirstName} ${contact.LastName}`);
+  });
+}
+```
+
+**Lazy Loading Child Records:**
+
+```typescript
+// Find a User (Contacts not loaded yet)
+const user = await User.find('005xxx');
+
+// Explicitly load the Contacts
+await user.loadContacts();
+
+// Now you can access Contacts
+console.log(`Found ${user.Contacts.length} contacts`);
+user.Contacts.forEach(contact => {
+  console.log(contact.FirstName);
+});
+```
+
+**Note:** Like `belongsTo`, the `loadContacts()` method automatically initializes the relationship, so you don't need to access `user.Contacts` before loading.
+
+### Salesforce Relationship Syntax
+
+When eager loading, use Salesforce's relationship syntax:
+
+```typescript
+// BelongsTo - Standard objects use singular relationship names
+.select('Id', 'Name', 'Owner.Name', 'Account.Name')
+
+// BelongsTo - Custom objects use __r suffix
+.select('Id', 'Name', 'CustomLookup__r.Name')
+
+// HasMany - Subqueries for child relationships
+.select('Id', 'Name', '(SELECT Id, Name FROM Contacts)')
+
+// HasMany - Custom object child relationships
+.select('Id', 'Name', '(SELECT Id, Name FROM CustomChildren__r)')
 ```
 
 ## Base Model Methods
