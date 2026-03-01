@@ -15,7 +15,7 @@ const program = new Command();
 program
   .name('sfc')
   .description('Salesforce Connector CLI - Generate TypeScript models from Salesforce metadata')
-  .version('1.0.1');
+  .version('1.0.3');
 
 /**
  * sfc init - Initialize .sfconnect.json config file

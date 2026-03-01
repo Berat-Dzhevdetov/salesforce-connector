@@ -1,6 +1,6 @@
 {
   "name": "javascript-salesforce-connector",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Salesforce ORM-like module with ActiveRecord-style interface",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
