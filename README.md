@@ -7,6 +7,7 @@ A TypeScript ORM library for Salesforce with an ActiveRecord-style interface. Th
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Authentication Strategy](#authentication-strategy)
+- [Model Generation (CLI)](#model-generation-cli)
 - [Creating Models](#creating-models)
 - [Query Operations](#query-operations)
 - [CRUD Operations](#crud-operations)
@@ -112,6 +113,239 @@ SalesforceConfig.initialize({
 const token = await authenticateWithSalesforce();
 SalesforceConfig.setAccessToken(token);
 ```
+
+## Model Generation (CLI)
+
+The `sfc` CLI tool automatically generates TypeScript model files from your Salesforce metadata. This is the **recommended way** to create models, as it ensures accuracy and saves time.
+
+### Installation
+
+**Install globally to use `sfc` commands directly:**
+```bash
+npm install -g javascript-salesforce-connector
+```
+
+Now you can use `sfc` anywhere without `npx`:
+```bash
+sfc init
+sfc scaffold Account Contact -o ./models
+sfc test-auth
+```
+
+**Alternative:** If you prefer not to install globally, use `npx` instead:
+```bash
+npx sfc init
+npx sfc scaffold Account Contact -o ./models
+```
+
+### Quick Start
+
+1. **Initialize configuration:**
+   ```bash
+   sfc init
+   ```
+   This creates a `.sfconnect.json` configuration file in your project root.
+
+2. **Configure authentication** by editing `.sfconnect.json`:
+   ```json
+   {
+     "instanceUrl": "https://your-instance.salesforce.com",
+     "apiVersion": "v59.0",
+     "authType": "jwt",
+     "tokenUrl": "https://login.salesforce.com/services/oauth2/token",
+     "clientId": "YOUR_CONNECTED_APP_CLIENT_ID",
+     "username": "your-username@example.com",
+     "privateKeyPath": "./certs/server.key",
+     "algorithm": "RS256"
+   }
+   ```
+
+3. **Test your authentication:**
+   ```bash
+   sfc test-auth
+   ```
+
+4. **Generate models:**
+   ```bash
+   sfc scaffold Account Contact Opportunity
+   ```
+
+### Generating Models
+
+**IMPORTANT:** Always use the exact Salesforce **API name** for objects:
+- ✅ Standard objects: `Account`, `Contact`, `Opportunity`, `Lead`, `Case`, `User`
+- ✅ Custom objects: `CustomObject__c`, `ProductReview__c` (must include `__c` suffix)
+- ❌ Don't use labels like "Accounts" or "Custom Object"
+
+#### Generate to default location (`./src/models`):
+```bash
+sfc scaffold Account Contact Opportunity
+```
+
+#### Generate to custom directory:
+```bash
+# Output to ./models
+sfc scaffold Account -o ./models
+
+# Output to nested directory
+sfc scaffold Contact Opportunity -o ./src/salesforce/models
+
+# Generate custom object
+sfc scaffold ProductReview__c -o ./models
+```
+
+#### Generate multiple objects at once:
+```bash
+sfc scaffold Account Contact Lead Opportunity Case -o ./models
+```
+
+### What Gets Generated
+
+For each Salesforce object, the CLI generates:
+- ✅ TypeScript interface (e.g., `AccountData`)
+- ✅ Model class extending `Model<T>`
+- ✅ Getters for all fields
+- ✅ Setters for updateable fields only (read-only fields excluded)
+- ✅ JSDoc comments with field labels and metadata
+- ✅ Proper TypeScript types based on Salesforce field types
+- ✅ An `index.ts` file for convenient imports
+
+**Example output structure:**
+```
+./models/
+  ├── Account.ts
+  ├── Contact.ts
+  ├── Opportunity.ts
+  └── index.ts
+```
+
+**Generated model example** (`Account.ts`):
+```typescript
+import { Model } from 'javascript-salesforce-connector';
+
+/**
+ * Data interface for Account (Account)
+ */
+export interface AccountData {
+  /** Account ID */
+  Id?: string | undefined;
+  /** Account Name */
+  Name?: string | undefined;
+  /** Industry */
+  Industry?: string | undefined;
+  /** Annual Revenue */
+  AnnualRevenue?: number | undefined;
+  // ... more fields
+}
+
+/**
+ * Model for Account (Account)
+ */
+export class Account extends Model<AccountData> {
+  protected static objectName = 'Account';
+
+  /** Get Account ID */
+  get Id(): string | undefined {
+    return this.get('Id');
+  }
+
+  /** Get Account Name */
+  get Name(): string | undefined {
+    return this.get('Name');
+  }
+
+  /** Set Account Name */
+  set Name(value: string | undefined) {
+    if (value !== undefined) {
+      this.set('Name', value);
+    }
+  }
+
+  // ... more getters/setters
+}
+```
+
+### CLI Commands Reference
+
+| Command | Description | Options |
+|---------|-------------|---------|
+| `sfc init` | Create `.sfconnect.json` config file | `-o, --output <path>` - Config file path |
+| `sfc scaffold <objects...>` | Generate TypeScript models from Salesforce metadata | `-o, --output <dir>` - Output directory (default: `./src/models`)<br>`-c, --config <path>` - Config file path<br>`--no-comments` - Skip JSDoc comments |
+| `sfc test-auth` | Test JWT authentication | `-c, --config <path>` - Config file path |
+
+### Using Generated Models
+
+Once generated, import and use your models:
+
+```typescript
+import { SalesforceConfig } from 'javascript-salesforce-connector';
+import { Account, Contact } from './models';
+
+// Initialize Salesforce config
+SalesforceConfig.initialize({
+  instanceUrl: 'https://your-instance.salesforce.com',
+  apiVersion: 'v59.0',
+  onTokenExpired: async () => {
+    return await refreshToken();
+  }
+});
+
+SalesforceConfig.setAccessToken(token);
+
+// Use the generated models
+const accounts = await Account
+  .select('Id', 'Name', 'Industry', 'AnnualRevenue')
+  .where('Industry', 'Technology')
+  .limit(10)
+  .get();
+
+for (const account of accounts) {
+  console.log(account.Name, account.Industry);
+}
+```
+
+### Authentication Setup (JWT Bearer Flow)
+
+The CLI uses **JWT Bearer Flow** for authentication. Here's how to set it up:
+
+1. **Create a Connected App in Salesforce:**
+   - Go to Setup → App Manager → New Connected App
+   - Enable OAuth Settings
+   - Enable "Use digital signatures"
+   - Upload your certificate (`.crt` file)
+   - Select OAuth scopes: `api`, `refresh_token`, `offline_access`
+   - Enable "Admin approved users are pre-authorized"
+
+2. **Generate RSA key pair:**
+   ```bash
+   # Generate private key
+   openssl genrsa -out server.key 2048
+
+   # Generate certificate
+   openssl req -new -x509 -key server.key -out server.crt -days 365
+   ```
+
+3. **Configure `.sfconnect.json`:**
+   ```json
+   {
+     "instanceUrl": "https://your-instance.salesforce.com",
+     "apiVersion": "v59.0",
+     "authType": "jwt",
+     "tokenUrl": "https://login.salesforce.com/services/oauth2/token",
+     "clientId": "YOUR_CONNECTED_APP_CLIENT_ID",
+     "username": "your-username@example.com",
+     "privateKeyPath": "./server.key",
+     "algorithm": "RS256"
+   }
+   ```
+
+4. **Add to `.gitignore`:**
+   ```
+   .sfconnect.json
+   *.key
+   *.crt
+   certs/
+   ```
 
 ## Creating Models
 
