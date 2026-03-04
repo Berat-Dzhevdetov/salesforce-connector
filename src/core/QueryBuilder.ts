@@ -13,9 +13,18 @@ export class QueryBuilder<T = any> {
   private orderByField?: string;
   private orderDirection: 'ASC' | 'DESC' = 'ASC';
   private modelConstructor?: new (data?: any) => T;
+  private dateFields: string[] = [];
+  private dateTimeFields: string[] = [];
 
-  constructor(private objectName: string, modelConstructor?: new (data?: any) => T) {
+  constructor(
+    private objectName: string,
+    modelConstructor?: new (data?: any) => T,
+    dateFields?: string[],
+    dateTimeFields?: string[]
+  ) {
     this.modelConstructor = modelConstructor;
+    this.dateFields = dateFields || [];
+    this.dateTimeFields = dateTimeFields || [];
   }
 
   /**
@@ -58,7 +67,7 @@ export class QueryBuilder<T = any> {
       actualValue = value;
     }
 
-    const formattedValue = this.formatValue(actualValue);
+    const formattedValue = this.formatValue(actualValue, field);
     this.whereClauses.push(`${field} ${operator} ${formattedValue}`);
 
     return this;
@@ -76,7 +85,7 @@ export class QueryBuilder<T = any> {
       throw new Error('whereIn() requires a non-empty array of values');
     }
 
-    const formattedValues = values.map(v => this.formatValue(v)).join(', ');
+    const formattedValues = values.map(v => this.formatValue(v, field)).join(', ');
     this.whereClauses.push(`${field} IN (${formattedValues})`);
 
     return this;
@@ -94,7 +103,7 @@ export class QueryBuilder<T = any> {
       throw new Error('whereNotIn() requires a non-empty array of values');
     }
 
-    const formattedValues = values.map(v => this.formatValue(v)).join(', ');
+    const formattedValues = values.map(v => this.formatValue(v, field)).join(', ');
     this.whereClauses.push(`${field} NOT IN (${formattedValues})`);
 
     return this;
@@ -208,7 +217,12 @@ export class QueryBuilder<T = any> {
   public async first(): Promise<T | null> {
     try {
       // Create a new query builder with limit 1 to avoid mutating this instance
-      const limitedQuery = new QueryBuilder<T>(this.objectName, this.modelConstructor);
+      const limitedQuery = new QueryBuilder<T>(
+        this.objectName,
+        this.modelConstructor,
+        this.dateFields,
+        this.dateTimeFields
+      );
       limitedQuery.selectedFields = [...this.selectedFields];
       limitedQuery.whereClauses = [...this.whereClauses];
       limitedQuery.orderByField = this.orderByField;
@@ -227,14 +241,9 @@ export class QueryBuilder<T = any> {
   /**
    * Format a value for SOQL query
    */
-  private formatValue(value: any): string {
+  private formatValue(value: any, fieldName?: string): string {
     if (value === null || value === undefined) {
       return 'NULL';
-    }
-
-    if (typeof value === 'string') {
-      // Escape single quotes in strings
-      return `'${value.replace(/'/g, "\\'")}'`;
     }
 
     if (typeof value === 'boolean') {
@@ -246,7 +255,44 @@ export class QueryBuilder<T = any> {
     }
 
     if (value instanceof Date) {
-      return `'${value.toISOString()}'`;
+      // Check if this is a date field (not datetime)
+      const isDateField = fieldName && this.dateFields.includes(fieldName);
+
+      if (isDateField) {
+        // For date fields, use YYYY-MM-DD format without quotes
+        return value.toISOString().split('T')[0];
+      } else {
+        // For datetime fields, use full ISO string without quotes
+        return value.toISOString();
+      }
+    }
+
+    if (typeof value === 'string') {
+      // Check if this field is a known date or datetime field
+      const isDateField = fieldName && this.dateFields.includes(fieldName);
+      const isDateTimeField = fieldName && this.dateTimeFields.includes(fieldName);
+
+      if (isDateField || isDateTimeField) {
+        // For date/datetime fields, return the value without quotes
+        // Date format: YYYY-MM-DD
+        // DateTime format: YYYY-MM-DDTHH:mm:ss or YYYY-MM-DDTHH:mm:ss.sssZ
+
+        // Check if the value looks like a datetime (has T in it)
+        const hasTimeComponent = value.includes('T');
+
+        if (hasTimeComponent) {
+          // Ensure datetime values end with Z if they don't already and don't have a timezone
+          if (!value.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(value)) {
+            return `${value}Z`;
+          }
+        }
+
+        // Return as-is without quotes (works for both date and datetime)
+        return value;
+      }
+
+      // Regular string - escape single quotes and wrap in quotes
+      return `'${value.replace(/'/g, "\\'")}'`;
     }
 
     // For objects and arrays, convert to JSON string

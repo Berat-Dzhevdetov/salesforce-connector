@@ -53,8 +53,10 @@ export class ModelGenerator {
 
       case 'date':
       case 'datetime':
+        return 'Date';
+
       case 'time':
-        return 'string'; // ISO date strings
+        return 'string'; // Time fields remain as strings (HH:mm:ss format)
 
       case 'base64':
         return 'string'; // Base64 encoded string
@@ -164,7 +166,7 @@ export class ModelGenerator {
    * Generate complete model class code
    */
   public static generate(metadata: SalesforceObjectMetadata, options: ModelGeneratorOptions = {}): string {
-    const { includeComments = true } = options;
+    const { includeComments = true, includeFields, excludeFields = [] } = options;
 
     let code = '';
 
@@ -185,7 +187,25 @@ export class ModelGenerator {
     }
 
     code += `export class ${metadata.name} extends Model<${metadata.name}Data> {\n`;
-    code += `  protected static objectName = '${metadata.name}';\n\n`;
+    code += `  protected static objectName = '${metadata.name}';\n`;
+
+    // Generate date and datetime field arrays
+    let fields = metadata.fields;
+    if (includeFields && includeFields.length > 0) {
+      fields = fields.filter((f) => includeFields.includes(f.name));
+    }
+    fields = fields.filter((f) => !excludeFields.includes(f.name));
+
+    const dateFields = fields.filter(f => f.type === 'date').map(f => f.name);
+    const dateTimeFields = fields.filter(f => f.type === 'datetime').map(f => f.name);
+
+    if (dateFields.length > 0) {
+      code += `  protected static dateFields = ${JSON.stringify(dateFields)};\n`;
+    }
+    if (dateTimeFields.length > 0) {
+      code += `  protected static dateTimeFields = ${JSON.stringify(dateTimeFields)};\n`;
+    }
+    code += '\n';
 
     // Accessors
     code += this.generateAccessors(metadata, options);
