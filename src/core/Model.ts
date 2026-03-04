@@ -11,6 +11,8 @@ import { HasManyProxy } from './HasManyProxy';
  */
 export class Model<T extends ModelData = ModelData> {
   protected static objectName: string;
+  protected static dateFields: string[] = [];
+  protected static dateTimeFields: string[] = [];
   protected data: Partial<T> = {};
   protected _isNew: boolean = true;
   protected _isDeleted: boolean = false;
@@ -18,11 +20,62 @@ export class Model<T extends ModelData = ModelData> {
   constructor(data?: Partial<T>) {
     if (data) {
       this.data = { ...data };
+      // Convert date/datetime strings to Date objects
+      this.convertDatesToObjects();
       // If data has an Id, this is an existing record
       if (data.Id) {
         this._isNew = false;
       }
     }
+  }
+
+  /**
+   * Convert date/datetime string fields to Date objects
+   */
+  private convertDatesToObjects(): void {
+    const constructor = this.constructor as typeof Model;
+    const dateFields = (constructor as any).dateFields || [];
+    const dateTimeFields = (constructor as any).dateTimeFields || [];
+    const allDateFields = [...dateFields, ...dateTimeFields];
+
+    for (const field of allDateFields) {
+      const value = this.data[field as keyof T];
+      if (value && typeof value === 'string') {
+        try {
+          (this.data as any)[field] = new Date(value);
+        } catch (error) {
+          // If conversion fails, keep the original value
+          console.warn(`Failed to convert field ${field} to Date:`, error);
+        }
+      }
+    }
+  }
+
+  /**
+   * Convert Date objects to ISO strings for Salesforce API
+   */
+  private convertDatesToStrings(data: Partial<T>): Partial<T> {
+    const constructor = this.constructor as typeof Model;
+    const dateFields = (constructor as any).dateFields || [];
+    const dateTimeFields = (constructor as any).dateTimeFields || [];
+    const allDateFields = [...dateFields, ...dateTimeFields];
+
+    const result = { ...data };
+
+    for (const field of allDateFields) {
+      const value: any = result[field as keyof T];
+      if (value instanceof Date) {
+        // For date fields, use YYYY-MM-DD format
+        // For datetime fields, use full ISO string
+        if (dateFields.includes(field)) {
+          (result as any)[field] = value.toISOString().split('T')[0];
+        } else {
+          (result as any)[field] = value.toISOString();
+        }
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -37,12 +90,54 @@ export class Model<T extends ModelData = ModelData> {
   }
 
   /**
+   * Get date fields for this model
+   */
+  protected static getDateFields(): string[] {
+    return this.dateFields || [];
+  }
+
+  /**
+   * Get datetime fields for this model
+   */
+  protected static getDateTimeFields(): string[] {
+    return this.dateTimeFields || [];
+  }
+
+  /**
+   * Convert Date objects to ISO strings for Salesforce API (static version)
+   */
+  protected static convertDatesToStringsStatic(data: Partial<ModelData>): Partial<ModelData> {
+    const dateFields = this.dateFields || [];
+    const dateTimeFields = this.dateTimeFields || [];
+    const allDateFields = [...dateFields, ...dateTimeFields];
+
+    const result = { ...data };
+
+    for (const field of allDateFields) {
+      const value: any = (result as any)[field];
+      if (value instanceof Date) {
+        // For date fields, use YYYY-MM-DD format
+        // For datetime fields, use full ISO string
+        if (dateFields.includes(field)) {
+          (result as any)[field] = value.toISOString().split('T')[0];
+        } else {
+          (result as any)[field] = value.toISOString();
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Create a new query builder for this model
    */
   public static query<T extends Model>(this: new (data?: any) => T): QueryBuilder<T> {
     const ModelClass = this as any;
     const objectName = ModelClass.getObjectName();
-    return new QueryBuilder<T>(objectName, this);
+    const dateFields = ModelClass.getDateFields ? ModelClass.getDateFields() : [];
+    const dateTimeFields = ModelClass.getDateTimeFields ? ModelClass.getDateTimeFields() : [];
+    return new QueryBuilder<T>(objectName, this, dateFields, dateTimeFields);
   }
 
   /**
@@ -123,13 +218,19 @@ export class Model<T extends ModelData = ModelData> {
       const baseUrl = SalesforceConfig.getApiBaseUrl();
       const url = `${baseUrl}/sobjects/${objectName}`;
 
-      const response = await SalesforceClient.post<{ id: string; success: boolean }>(url, payload);
+      // Convert Date objects to strings before sending to Salesforce
+      const convertedPayload = ModelClass.convertDatesToStringsStatic
+        ? ModelClass.convertDatesToStringsStatic(payload)
+        : payload;
+
+      const response = await SalesforceClient.post<{ id: string; success: boolean }>(url, convertedPayload);
 
       if (!response?.data?.id) {
         throw new Error('Failed to create record: No ID returned');
       }
 
       // Return a new instance with the created ID and original payload
+      // The constructor will convert date strings back to Date objects
       return new this({ ...payload, Id: response.data.id });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -199,9 +300,12 @@ export class Model<T extends ModelData = ModelData> {
       const baseUrl = SalesforceConfig.getApiBaseUrl();
       const url = `${baseUrl}/sobjects/${objectName}/${id}`;
 
-      await SalesforceClient.patch(url, payload);
+      // Convert Date objects to strings before sending to Salesforce
+      const convertedPayload = this.convertDatesToStrings(payload);
 
-      // Update the local data
+      await SalesforceClient.patch(url, convertedPayload);
+
+      // Update the local data (keep Date objects locally)
       this.data = { ...this.data, ...payload };
 
       return this;
@@ -235,7 +339,10 @@ export class Model<T extends ModelData = ModelData> {
         const url = `${baseUrl}/sobjects/${objectName}`;
 
         // Remove Id from payload if it exists
-        const { Id, ...payload } = this.data;
+        const { Id, ...dataWithoutId } = this.data;
+
+        // Convert Date objects to strings before sending to Salesforce
+        const payload = this.convertDatesToStrings(dataWithoutId as Partial<T>);
 
         const response = await SalesforceClient.post<{ id: string; success: boolean }>(url, payload);
 
@@ -256,7 +363,10 @@ export class Model<T extends ModelData = ModelData> {
       const url = `${baseUrl}/sobjects/${objectName}/${id}`;
 
       // Remove Id from payload for update
-      const { Id, ...payload } = this.data;
+      const { Id, ...dataWithoutId } = this.data;
+
+      // Convert Date objects to strings before sending to Salesforce
+      const payload = this.convertDatesToStrings(dataWithoutId as Partial<T>);
 
       await SalesforceClient.patch(url, payload);
 
