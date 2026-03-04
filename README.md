@@ -1,3 +1,5 @@
+[![Publish to NPM](https://github.com/Berat-Dzhevdetov/salesforce-connector/actions/workflows/publish.yml/badge.svg)](https://github.com/Berat-Dzhevdetov/salesforce-connector/actions/workflows/publish.yml)
+
 # Salesforce ORM
 
 A TypeScript ORM library for Salesforce with an ActiveRecord-style interface. This library provides a fluent API for querying and manipulating Salesforce records using the Salesforce REST API.
