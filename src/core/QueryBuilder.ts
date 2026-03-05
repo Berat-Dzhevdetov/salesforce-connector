@@ -5,9 +5,14 @@ import { SalesforceQueryResponse, QueryOperator } from '../types';
 /**
  * Query builder for constructing and executing SOQL queries
  */
+type WhereClause = {
+  condition: string;
+  connector: 'AND' | 'OR';
+};
+
 export class QueryBuilder<T = any> {
   private selectedFields: string[] = [];
-  private whereClauses: string[] = [];
+  private whereClauses: WhereClause[] = [];
   private limitValue?: number;
   private offsetValue?: number;
   private orderByField?: string;
@@ -68,7 +73,40 @@ export class QueryBuilder<T = any> {
     }
 
     const formattedValue = this.formatValue(actualValue, field);
-    this.whereClauses.push(`${field} ${operator} ${formattedValue}`);
+    this.whereClauses.push({
+      condition: `${field} ${operator} ${formattedValue}`,
+      connector: 'AND'
+    });
+
+    return this;
+  }
+
+  /**
+   * Add OR WHERE clause
+   * Usage: orWhere('Name', 'Ivan') or orWhere('Age', '>', 18)
+   */
+  public orWhere(field: string, operatorOrValue: QueryOperator | any, value?: any): this {
+    if (!field || typeof field !== 'string') {
+      throw new Error('orWhere() requires a valid field name');
+    }
+
+    let operator: QueryOperator = '=';
+    let actualValue: any;
+
+    // Handle two-parameter form: orWhere('Name', 'Ivan')
+    if (value === undefined) {
+      actualValue = operatorOrValue;
+    } else {
+      // Handle three-parameter form: orWhere('Age', '>', 18)
+      operator = operatorOrValue as QueryOperator;
+      actualValue = value;
+    }
+
+    const formattedValue = this.formatValue(actualValue, field);
+    this.whereClauses.push({
+      condition: `${field} ${operator} ${formattedValue}`,
+      connector: 'OR'
+    });
 
     return this;
   }
@@ -86,7 +124,10 @@ export class QueryBuilder<T = any> {
     }
 
     const formattedValues = values.map(v => this.formatValue(v, field)).join(', ');
-    this.whereClauses.push(`${field} IN (${formattedValues})`);
+    this.whereClauses.push({
+      condition: `${field} IN (${formattedValues})`,
+      connector: 'AND'
+    });
 
     return this;
   }
@@ -104,7 +145,102 @@ export class QueryBuilder<T = any> {
     }
 
     const formattedValues = values.map(v => this.formatValue(v, field)).join(', ');
-    this.whereClauses.push(`${field} NOT IN (${formattedValues})`);
+    this.whereClauses.push({
+      condition: `${field} NOT IN (${formattedValues})`,
+      connector: 'AND'
+    });
+
+    return this;
+  }
+
+  /**
+   * Add a grouped OR WHERE clause
+   * Usage:
+   * query.where('IsActive', true)
+   *      .orWhereGroup(qb => {
+   *        qb.where('Name', 'LIKE', '%John%')
+   *          .orWhere('Email', 'LIKE', '%john%')
+   *      })
+   * Results in: WHERE IsActive = TRUE AND (Name LIKE '%John%' OR Email LIKE '%john%')
+   */
+  public orWhereGroup(callback: (qb: QueryBuilder<T>) => void): this {
+    // Create a new query builder for the group
+    const groupBuilder = new QueryBuilder<T>(
+      this.objectName,
+      this.modelConstructor,
+      this.dateFields,
+      this.dateTimeFields
+    );
+
+    // Execute the callback to build the group conditions
+    callback(groupBuilder);
+
+    // Get the conditions from the group builder
+    if (groupBuilder.whereClauses.length === 0) {
+      throw new Error('orWhereGroup() requires at least one condition inside the group');
+    }
+
+    // Build the grouped condition string
+    const groupConditions = groupBuilder.whereClauses
+      .map((clause, index) => {
+        if (index === 0) {
+          return clause.condition;
+        }
+        return `${clause.connector} ${clause.condition}`;
+      })
+      .join(' ');
+
+    // Add the grouped condition with OR connector
+    this.whereClauses.push({
+      condition: `(${groupConditions})`,
+      connector: 'OR'
+    });
+
+    return this;
+  }
+
+  /**
+   * Add a grouped AND WHERE clause
+   * Usage:
+   * query.where('IsActive', true)
+   *      .whereGroup(qb => {
+   *        qb.where('Name', 'LIKE', '%John%')
+   *          .orWhere('Email', 'LIKE', '%john%')
+   *      })
+   * Results in: WHERE IsActive = TRUE AND (Name LIKE '%John%' OR Email LIKE '%john%')
+   */
+  public whereGroup(callback: (qb: QueryBuilder<T>) => void): this {
+    // Create a new query builder for the group
+    const groupBuilder = new QueryBuilder<T>(
+      this.objectName,
+      this.modelConstructor,
+      this.dateFields,
+      this.dateTimeFields
+    );
+
+    // Execute the callback to build the group conditions
+    callback(groupBuilder);
+
+    // Get the conditions from the group builder
+    if (groupBuilder.whereClauses.length === 0) {
+      throw new Error('whereGroup() requires at least one condition inside the group');
+    }
+
+    // Build the grouped condition string
+    const groupConditions = groupBuilder.whereClauses
+      .map((clause, index) => {
+        if (index === 0) {
+          return clause.condition;
+        }
+        return `${clause.connector} ${clause.condition}`;
+      })
+      .join(' ');
+
+    // Add the grouped condition with AND connector
+    this.whereClauses.push({
+      condition: `(${groupConditions})`,
+      connector: 'AND'
+    });
 
     return this;
   }
@@ -164,7 +300,18 @@ export class QueryBuilder<T = any> {
     let query = `SELECT ${fields} FROM ${this.objectName}`;
 
     if (this.whereClauses.length > 0) {
-      query += ` WHERE ${this.whereClauses.join(' AND ')}`;
+      const whereString = this.whereClauses
+        .map((clause, index) => {
+          if (index === 0) {
+            // First clause doesn't need a connector
+            return clause.condition;
+          }
+          // Subsequent clauses use their connector
+          return `${clause.connector} ${clause.condition}`;
+        })
+        .join(' ');
+
+      query += ` WHERE ${whereString}`;
     }
 
     if (this.orderByField) {
