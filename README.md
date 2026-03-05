@@ -4,6 +4,33 @@
 
 A TypeScript ORM library for Salesforce with an ActiveRecord-style interface. This library provides a fluent API for querying and manipulating Salesforce records using the Salesforce REST API.
 
+## ⚠️ Important: Salesforce Governor Limits
+
+**This library does NOT automatically handle Salesforce governor limits.** You, as the developer, are responsible for writing queries that respect Salesforce's limits.
+
+### Example: Be Careful with `Model.all()`
+
+```typescript
+// ⚠️ DANGEROUS - May retrieve thousands of records and hit limits!
+const allAccounts = await Account.all();
+
+// ✅ BETTER - Always use LIMIT to control record retrieval
+const accounts = await Account
+  .select('Id', 'Name', 'Industry')
+  .limit(200)  // Stay within safe limits
+  .get();
+
+// ✅ BEST - Query only what you need with proper filtering
+const techAccounts = await Account
+  .select('Id', 'Name')
+  .where('Industry', 'Technology')
+  .where('IsActive', true)
+  .limit(100)
+  .get();
+```
+
+**Remember:** Always filter, limit, and paginate your queries. The library provides the tools, but you must use them responsibly.
+
 ## Table of Contents
 
 - [Installation](#installation)
@@ -634,6 +661,150 @@ const accounts = await Account
   .limit(20)
   .get();
 ```
+
+### OR Conditions and Query Grouping
+
+The library supports OR conditions and grouped conditions for complex query logic.
+
+#### Simple OR Conditions
+
+Use `orWhere()` to add alternative conditions:
+
+```typescript
+// Find accounts named either "Acme" OR "TechCorp"
+const accounts = await Account
+  .where('Name', 'Acme')
+  .orWhere('Name', 'TechCorp')
+  .get();
+
+// Results in: WHERE Name = 'Acme' OR Name = 'TechCorp'
+```
+
+#### Grouped Conditions with `whereGroup()`
+
+Use `whereGroup()` to combine conditions with parentheses (using AND connector):
+
+```typescript
+// Find active accounts where Name contains "Tech" OR Email contains "tech"
+const accounts = await Account
+  .where('IsActive', true)
+  .whereGroup(qb => {
+    qb.where('Name', 'LIKE', '%Tech%')
+      .orWhere('Email', 'LIKE', '%tech%')
+  })
+  .get();
+
+// Results in: WHERE IsActive = TRUE AND (Name LIKE '%Tech%' OR Email LIKE '%tech%')
+```
+
+#### Grouped Conditions with `orWhereGroup()`
+
+Use `orWhereGroup()` to add grouped conditions with OR connector:
+
+```typescript
+// Find accounts that are EITHER in Technology industry OR (have high revenue AND are in Finance)
+const accounts = await Account
+  .where('Industry', 'Technology')
+  .orWhereGroup(qb => {
+    qb.where('AnnualRevenue', '>', 10000000)
+      .where('Industry', 'Finance')
+  })
+  .get();
+
+// Results in: WHERE Industry = 'Technology' OR (AnnualRevenue > 10000000 AND Industry = 'Finance')
+```
+
+#### Why Grouping Matters: Operator Precedence
+
+⚠️ **Important:** In SQL, AND has higher precedence than OR. Mixing `where()` and `orWhere()` without groups can produce unexpected results!
+
+```typescript
+// ❌ CONFUSING - May not work as expected
+const contacts = await Contact
+  .where('IsActive', true)
+  .where('Name', 'LIKE', '%John%')
+  .orWhere('Email', 'LIKE', '%john%')
+  .get();
+
+// Results in: WHERE IsActive = TRUE AND Name LIKE '%John%' OR Email LIKE '%john%'
+// This matches: (Active AND Name has John) OR (Email has john - even if inactive!)
+```
+
+```typescript
+// ✅ CORRECT - Use grouping for clarity
+const contacts = await Contact
+  .where('IsActive', true)
+  .whereGroup(qb => {
+    qb.where('Name', 'LIKE', '%John%')
+      .orWhere('Email', 'LIKE', '%john%')
+  })
+  .get();
+
+// Results in: WHERE IsActive = TRUE AND (Name LIKE '%John%' OR Email LIKE '%john%')
+// This matches: Active records where (Name has John OR Email has john)
+```
+
+#### Practical Examples
+
+**Example 1: Search by multiple fields**
+```typescript
+// Find transaction journals by mission code AND (current user OR group member)
+const journal = await TransactionJournal
+  .select('Id', 'MissionCode__c', 'MemberId')
+  .where('MissionCode__c', 'M-0000030')
+  .whereGroup(qb => {
+    qb.where('MemberId', loyaltyMemberId)
+      .orWhere('MemberId', loyaltyGroupMemberId)
+  })
+  .first();
+
+// Results in: WHERE MissionCode__c = 'M-0000030' AND (MemberId = 'user123' OR MemberId = 'group456')
+```
+
+**Example 2: Complex business logic**
+```typescript
+// Find high-priority opportunities: Large deals OR strategic accounts
+const opportunities = await Opportunity
+  .whereGroup(qb => {
+    qb.where('Amount', '>', 1000000)
+      .where('Stage', 'Negotiation')
+  })
+  .orWhereGroup(qb => {
+    qb.where('Account.IsStrategic__c', true)
+      .where('Probability', '>', 50)
+  })
+  .get();
+
+// Results in: WHERE (Amount > 1000000 AND Stage = 'Negotiation')
+//             OR (Account.IsStrategic__c = TRUE AND Probability > 50)
+```
+
+**Example 3: Nested groups**
+```typescript
+// Find contacts: Premium tier OR (Active AND engaged recently)
+const contacts = await Contact
+  .where('Tier__c', 'Premium')
+  .orWhereGroup(qb => {
+    qb.where('IsActive', true)
+      .where('LastEngagementDate__c', '>', '2025-01-01')
+  })
+  .limit(100)
+  .get();
+
+// Results in: WHERE Tier__c = 'Premium'
+//             OR (IsActive = TRUE AND LastEngagementDate__c > 2025-01-01)
+```
+
+#### Quick Reference
+
+| Method | Connector | Use Case | Example |
+|--------|-----------|----------|---------|
+| `where()` | AND | Add required condition | `.where('IsActive', true)` |
+| `orWhere()` | OR | Add alternative condition | `.orWhere('Status', 'Pending')` |
+| `whereGroup()` | AND | Group conditions with AND | `.whereGroup(qb => qb.where(...).orWhere(...))` |
+| `orWhereGroup()` | OR | Group conditions with OR | `.orWhereGroup(qb => qb.where(...).where(...))` |
+
+**Best Practice:** Always use `whereGroup()` or `orWhereGroup()` when mixing AND/OR logic to make your intent explicit and avoid precedence issues.
 
 ## CRUD Operations
 
