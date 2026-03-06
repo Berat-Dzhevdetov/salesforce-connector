@@ -647,6 +647,30 @@ Retrieve all records without filtering:
 const allAccounts = await Account.all();
 ```
 
+### Count Records
+
+Get the count of records matching a query without retrieving the actual records:
+
+```typescript
+// Count all Technology accounts
+const count = await Account
+  .where('Industry', 'Technology')
+  .count();
+
+console.log(count); // e.g., 150
+
+// Count with multiple conditions
+const highValueCount = await Account
+  .where('Industry', 'Technology')
+  .where('AnnualRevenue', '>', 1000000)
+  .count();
+
+// Count all records
+const totalAccounts = await Account.query().count();
+```
+
+**Note:** The `count()` method is efficient as it uses Salesforce's `SELECT COUNT()` query, which only returns the number of matching records without transferring the actual data.
+
 ### Complex Queries
 
 Chain multiple query methods:

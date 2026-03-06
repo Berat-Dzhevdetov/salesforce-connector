@@ -386,6 +386,39 @@ export class QueryBuilder<T = any> {
   }
 
   /**
+   * Execute the query and return the count of matching records
+   */
+  public async count(): Promise<number> {
+    try {
+      let query = `SELECT COUNT() FROM ${this.objectName}`;
+
+      if (this.whereClauses.length > 0) {
+        const whereString = this.whereClauses
+          .map((clause, index) => {
+            if (index === 0) {
+              return clause.condition;
+            }
+            return `${clause.connector} ${clause.condition}`;
+          })
+          .join(' ');
+
+        query += ` WHERE ${whereString}`;
+      }
+
+      const baseUrl = SalesforceConfig.getApiBaseUrl();
+      const encodedQuery = encodeURIComponent(query);
+      const url = `${baseUrl}/query?q=${encodedQuery}`;
+
+      const response = await SalesforceClient.get<SalesforceQueryResponse<any>>(url);
+
+      return response?.data?.totalSize || 0;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Count query execution failed: ${errorMessage}`);
+    }
+  }
+
+  /**
    * Format a value for SOQL query
    */
   private formatValue(value: any, fieldName?: string): string {
