@@ -1,0 +1,89 @@
+site_name: Salesforce ORM
+site_url: https://berat-dzhevdetov.github.io/salesforce-connector/
+site_description: A TypeScript ORM library for Salesforce with an ActiveRecord-style interface
+site_author: Berat Yuseinov
+
+repo_name: Berat-Dzhevdetov/salesforce-connector
+repo_url: https://github.com/Berat-Dzhevdetov/salesforce-connector
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - social
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: installation.md
+    - Configuration: configuration.md
+    - Authentication: authentication.md
+  - CLI Tools:
+    - Model Generation: cli-model-generation.md
+    - Observer Generation: cli-observer-generation.md
+  - Core Features:
+    - Query Operations: query-operations.md
+    - CRUD Operations: crud-operations.md
+    - Observers: observers.md
+    - Relationships: relationships.md
+  - Reference:
+    - API Documentation: api-reference.md
+    - Examples: examples.md
+    - TypeScript Support: typescript.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Berat-Dzhevdetov/salesforce-connector
+    - icon: fontawesome/brands/npm
+      link: https://www.npmjs.com/package/javascript-salesforce-connector
+
+copyright: Copyright &copy; 2026 Berat Yuseinov
