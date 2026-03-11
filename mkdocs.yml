@@ -58,26 +58,9 @@ markdown_extensions:
 
 plugins:
   - search
-  - social
 
 nav:
   - Home: index.md
-  - Getting Started:
-    - Installation: installation.md
-    - Configuration: configuration.md
-    - Authentication: authentication.md
-  - CLI Tools:
-    - Model Generation: cli-model-generation.md
-    - Observer Generation: cli-observer-generation.md
-  - Core Features:
-    - Query Operations: query-operations.md
-    - CRUD Operations: crud-operations.md
-    - Observers: observers.md
-    - Relationships: relationships.md
-  - Reference:
-    - API Documentation: api-reference.md
-    - Examples: examples.md
-    - TypeScript Support: typescript.md
 
 extra:
   social:
