@@ -32,3 +32,6 @@ yarn-error.log*
 .eslintcache
 
 PUBLISHING.md
+docs/
+LICENSE
+.github/

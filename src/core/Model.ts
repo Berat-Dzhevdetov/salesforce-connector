@@ -4,6 +4,7 @@ import { SalesforceConfig } from './SalesforceConfig';
 import { ModelData } from '../types';
 import { RelationshipProxy } from './RelationshipProxy';
 import { HasManyProxy } from './HasManyProxy';
+import { Observer, ObserverOptions } from './Observer';
 
 /**
  * Base Model class for Salesforce objects
@@ -16,6 +17,13 @@ export class Model<T extends ModelData = ModelData> {
   protected data: Partial<T> = {};
   protected _isNew: boolean = true;
   protected _isDeleted: boolean = false;
+
+  // Observer registry - stores observers per model class
+  private static observers: Map<string, Observer<any>[]> = new Map();
+  private static observerOptions: ObserverOptions = {
+    stopOnError: true,
+    parallel: false
+  };
 
   constructor(data?: Partial<T>) {
     if (data) {
@@ -87,6 +95,130 @@ export class Model<T extends ModelData = ModelData> {
       throw new Error(`objectName not defined for ${this.name}. Override getObjectName() or set static objectName property.`);
     }
     return this.objectName;
+  }
+
+  /**
+   * Register an observer for this model
+   * Observers respond to lifecycle events (create, update, delete, etc.)
+   *
+   * @param observer - The observer instance to register
+   *
+   * @example
+   * ```typescript
+   * class AccountObserver implements Observer<Account> {
+   *   async beforeCreate(account: Account) {
+   *     console.log('Creating account:', account.Name);
+   *   }
+   * }
+   *
+   * Account.observe(new AccountObserver());
+   * ```
+   */
+  public static observe<T extends Model>(observer: Observer<T>): void {
+    const modelName = this.getObjectName();
+
+    if (!this.observers.has(modelName)) {
+      this.observers.set(modelName, []);
+    }
+
+    this.observers.get(modelName)!.push(observer);
+  }
+
+  /**
+   * Remove an observer from this model
+   *
+   * @param observer - The observer instance to remove
+   */
+  public static removeObserver<T extends Model>(observer: Observer<T>): void {
+    const modelName = this.getObjectName();
+    const observers = this.observers.get(modelName);
+
+    if (observers) {
+      const index = observers.indexOf(observer);
+      if (index > -1) {
+        observers.splice(index, 1);
+      }
+    }
+  }
+
+  /**
+   * Get all observers registered for this model
+   *
+   * @returns Array of observers
+   */
+  protected static getObservers<T extends Model>(): Observer<T>[] {
+    const modelName = this.getObjectName();
+    return this.observers.get(modelName) || [];
+  }
+
+  /**
+   * Clear all observers for this model
+   * Useful for testing
+   */
+  public static clearObservers(): void {
+    const modelName = this.getObjectName();
+    this.observers.delete(modelName);
+  }
+
+  /**
+   * Configure observer execution behavior
+   *
+   * @param options - Observer execution options
+   */
+  public static setObserverOptions(options: ObserverOptions): void {
+    this.observerOptions = { ...this.observerOptions, ...options };
+  }
+
+  /**
+   * Execute observer hooks
+   *
+   * @param hookName - The hook method name to execute
+   * @param args - Arguments to pass to the hook
+   */
+  protected static async executeObservers<T extends Model>(
+    hookName: keyof Observer<T>,
+    ...args: any[]
+  ): Promise<void> {
+    const observers = this.getObservers<T>();
+
+    if (observers.length === 0) {
+      return;
+    }
+
+    const { stopOnError, parallel } = this.observerOptions;
+
+    if (parallel) {
+      // Execute all observers in parallel
+      const promises = observers
+        .filter(observer => typeof observer[hookName] === 'function')
+        .map(observer => {
+          try {
+            return (observer[hookName] as any)(...args);
+          } catch (error) {
+            if (stopOnError) {
+              throw error;
+            }
+            console.error(`Observer hook ${String(hookName)} failed:`, error);
+            return Promise.resolve();
+          }
+        });
+
+      await Promise.all(promises);
+    } else {
+      // Execute observers sequentially
+      for (const observer of observers) {
+        if (typeof observer[hookName] === 'function') {
+          try {
+            await (observer[hookName] as any)(...args);
+          } catch (error) {
+            if (stopOnError) {
+              throw error;
+            }
+            console.error(`Observer hook ${String(hookName)} failed:`, error);
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -218,10 +350,19 @@ export class Model<T extends ModelData = ModelData> {
       const baseUrl = SalesforceConfig.getApiBaseUrl();
       const url = `${baseUrl}/sobjects/${objectName}`;
 
+      // Create temporary instance for hooks
+      const tempInstance = new this(payload);
+
+      // Execute beforeSave observers (isNew = true)
+      await ModelClass.executeObservers('beforeSave', tempInstance, true);
+
+      // Execute beforeCreate observers
+      await ModelClass.executeObservers('beforeCreate', tempInstance);
+
       // Convert Date objects to strings before sending to Salesforce
       const convertedPayload = ModelClass.convertDatesToStringsStatic
-        ? ModelClass.convertDatesToStringsStatic(payload)
-        : payload;
+        ? ModelClass.convertDatesToStringsStatic(tempInstance.getData())
+        : tempInstance.getData();
 
       const response = await SalesforceClient.post<{ id: string; success: boolean }>(url, convertedPayload);
 
@@ -231,7 +372,15 @@ export class Model<T extends ModelData = ModelData> {
 
       // Return a new instance with the created ID and original payload
       // The constructor will convert date strings back to Date objects
-      return new this({ ...payload, Id: response.data.id });
+      const instance = new this({ ...tempInstance.getData(), Id: response.data.id });
+
+      // Execute afterCreate observers
+      await ModelClass.executeObservers('afterCreate', instance);
+
+      // Execute afterSave observers (isNew = true)
+      await ModelClass.executeObservers('afterSave', instance, true);
+
+      return instance;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to create record: ${errorMessage}`);
@@ -300,6 +449,12 @@ export class Model<T extends ModelData = ModelData> {
       const baseUrl = SalesforceConfig.getApiBaseUrl();
       const url = `${baseUrl}/sobjects/${objectName}/${id}`;
 
+      // Execute beforeSave observers (isNew = false)
+      await (constructor as any).executeObservers('beforeSave', this, false);
+
+      // Execute beforeUpdate observers
+      await (constructor as any).executeObservers('beforeUpdate', this, payload);
+
       // Convert Date objects to strings before sending to Salesforce
       const convertedPayload = this.convertDatesToStrings(payload);
 
@@ -307,6 +462,12 @@ export class Model<T extends ModelData = ModelData> {
 
       // Update the local data (keep Date objects locally)
       this.data = { ...this.data, ...payload };
+
+      // Execute afterUpdate observers
+      await (constructor as any).executeObservers('afterUpdate', this, payload);
+
+      // Execute afterSave observers (isNew = false)
+      await (constructor as any).executeObservers('afterSave', this, false);
 
       return this;
     } catch (error) {
@@ -330,13 +491,20 @@ export class Model<T extends ModelData = ModelData> {
       }
 
       const id = this.getId();
+      const isNew = !id || this._isNew;
+      const constructor = this.constructor as typeof Model;
+
+      // Execute beforeSave observers
+      await (constructor as any).executeObservers('beforeSave', this, isNew);
 
       // If no ID, create a new record
-      if (!id || this._isNew) {
-        const constructor = this.constructor as typeof Model;
+      if (isNew) {
         const objectName = (constructor as any).getObjectName();
         const baseUrl = SalesforceConfig.getApiBaseUrl();
         const url = `${baseUrl}/sobjects/${objectName}`;
+
+        // Execute beforeCreate observers
+        await (constructor as any).executeObservers('beforeCreate', this);
 
         // Remove Id from payload if it exists
         const { Id, ...dataWithoutId } = this.data;
@@ -353,22 +521,31 @@ export class Model<T extends ModelData = ModelData> {
         this.data.Id = response.data.id as any;
         this._isNew = false;
 
-        return this;
+        // Execute afterCreate observers
+        await (constructor as any).executeObservers('afterCreate', this);
+      } else {
+        // Otherwise, update the existing record
+        const objectName = (constructor as any).getObjectName();
+        const baseUrl = SalesforceConfig.getApiBaseUrl();
+        const url = `${baseUrl}/sobjects/${objectName}/${id}`;
+
+        // Remove Id from payload for update
+        const { Id, ...dataWithoutId } = this.data;
+
+        // Execute beforeUpdate observers
+        await (constructor as any).executeObservers('beforeUpdate', this, dataWithoutId);
+
+        // Convert Date objects to strings before sending to Salesforce
+        const payload = this.convertDatesToStrings(dataWithoutId as Partial<T>);
+
+        await SalesforceClient.patch(url, payload);
+
+        // Execute afterUpdate observers
+        await (constructor as any).executeObservers('afterUpdate', this, dataWithoutId);
       }
 
-      // Otherwise, update the existing record
-      const constructor = this.constructor as typeof Model;
-      const objectName = (constructor as any).getObjectName();
-      const baseUrl = SalesforceConfig.getApiBaseUrl();
-      const url = `${baseUrl}/sobjects/${objectName}/${id}`;
-
-      // Remove Id from payload for update
-      const { Id, ...dataWithoutId } = this.data;
-
-      // Convert Date objects to strings before sending to Salesforce
-      const payload = this.convertDatesToStrings(dataWithoutId as Partial<T>);
-
-      await SalesforceClient.patch(url, payload);
+      // Execute afterSave observers
+      await (constructor as any).executeObservers('afterSave', this, isNew);
 
       return this;
     } catch (error) {
@@ -403,10 +580,16 @@ export class Model<T extends ModelData = ModelData> {
       const baseUrl = SalesforceConfig.getApiBaseUrl();
       const url = `${baseUrl}/sobjects/${objectName}/${id}`;
 
+      // Execute beforeDelete observers
+      await (constructor as any).executeObservers('beforeDelete', this);
+
       await SalesforceClient.delete(url);
 
       // Mark as deleted but preserve data for reference
       this._isDeleted = true;
+
+      // Execute afterDelete observers
+      await (constructor as any).executeObservers('afterDelete', this);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to delete record: ${errorMessage}`);
