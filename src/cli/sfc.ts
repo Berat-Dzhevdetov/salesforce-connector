@@ -6,6 +6,7 @@ import { AuthHelper } from './AuthHelper';
 import { SalesforceConfig } from '../core/SalesforceConfig';
 import { MetadataFetcher } from '../generators/MetadataFetcher';
 import { ModelGenerator, ModelGeneratorOptions } from '../generators/ModelGenerator';
+import { ObserverGenerator } from '../generators/ObserverGenerator';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
@@ -194,6 +195,30 @@ program
       console.log('\nYou can now run: sfc scaffold');
     } catch (error) {
       console.error('\nAuthentication failed:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+/**
+ * sfc generate-observer - Generate observer for a model
+ */
+program
+  .command('generate-observer <model> <observerName>')
+  .description('Generate an observer file for a Salesforce model')
+  .option('-o, --output <dir>', 'Output directory for observer', './src/observers')
+  .action((model: string, observerName: string, options) => {
+    try {
+      console.log(`\nGenerating observer for ${model}...\n`);
+
+      // Generate the observer
+      ObserverGenerator.generate(model, observerName, options.output);
+
+      console.log('\nNext steps:');
+      console.log(`1. Review and customize: ${path.join(options.output, observerName)}.ts`);
+      console.log(`2. Register in your app: ${model}.observe(new ${observerName}());`);
+      console.log(`3. Or use setup file: import { registerObservers } from '${options.output}/setup';`);
+    } catch (error) {
+      console.error('\nError:', error instanceof Error ? error.message : error);
       process.exit(1);
     }
   });

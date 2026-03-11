@@ -9,6 +9,9 @@ export { QueryBuilder } from './core/QueryBuilder';
 export { SalesforceConfig } from './core/SalesforceConfig';
 export { SalesforceClient } from './core/SalesforceClient';
 
+// Observer exports
+export type { Observer, ObserverOptions } from './core/Observer';
+
 // Type exports
 export type {
   SalesforceConfig as ISalesforceConfig,
