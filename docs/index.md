@@ -229,6 +229,112 @@ sfc scaffold ProductReview__c -o ./models
 sfc scaffold Account Contact Lead Opportunity Case -o ./models
 ```
 
+### Smart Incremental Scaffolding
+
+⚠️ **Important Change:** As of v1.1.0, the scaffold command intelligently **preserves your custom code** when updating existing models!
+
+#### How It Works
+
+When you run `sfc scaffold` on an **existing model file**:
+
+1. ✅ **Preserves custom methods** - Your business logic, helpers, and custom functions stay intact
+2. ✅ **Preserves custom interface properties** - Relationship fields like `Owner?: UserData` are kept
+3. ✅ **Preserves custom imports** - Related model imports remain in place
+4. ✅ **Updates field definitions** - Adds new fields from Salesforce metadata
+5. ✅ **Updates field types** - Fixes type mismatches (e.g., `string` → `number`)
+6. ✅ **Creates automatic backups** - Original file backed up before modification
+7. ✅ **Smart index.ts merging** - Adds new exports while preserving custom ones
+
+**Example Scenario:**
+
+```typescript
+// Your existing TransactionJournal.ts with custom code
+export class TransactionJournal extends Model<TransactionJournalData> {
+  // ... generated getters/setters ...
+
+  // YOUR CUSTOM CODE (preserved!)
+  get MC_Contact__r(): ContactData | null {
+    return this.belongsTo<ContactData>('MC_Contact__r', 'MC_Contact__c', Contact);
+  }
+
+  async loadMCContact(): Promise<void> {
+    await this.loadRelationship('MC_Contact__r');
+  }
+
+  toClientFormat() {
+    return {
+      id: this.Id,
+      date: this.ActivityDate,
+      // ... your custom logic
+    };
+  }
+}
+```
+
+**Re-running scaffold (adding 5 new Salesforce fields):**
+
+```bash
+sfc scaffold TransactionJournal
+```
+
+**Result:**
+- ✅ 5 new fields added to the interface
+- ✅ 5 new getters/setters generated
+- ✅ All your custom methods preserved
+- ✅ Custom relationship getters preserved
+- ✅ Backup created: `TransactionJournal.ts.backup.2025-03-19T10-30-15-000Z`
+
+#### Scaffold Options
+
+**Default behavior (recommended):**
+```bash
+# Preserves custom code, creates backups
+sfc scaffold Account Contact
+```
+
+**Force regeneration (discards all custom code):**
+```bash
+# ⚠️ WARNING: Overwrites everything, losing custom methods!
+sfc scaffold Account --force
+```
+
+**Skip backups:**
+```bash
+# Preserves custom code but doesn't create .backup files
+sfc scaffold Account --no-backup
+```
+
+#### What Gets Preserved
+
+✅ **In the Interface (`AccountData`):**
+- Custom relationship properties (e.g., `Owner?: UserData`)
+- Manually added fields not in Salesforce metadata
+
+✅ **In the Class:**
+- Custom methods (e.g., `toClientFormat()`, `calculateTotal()`)
+- Custom relationship getters (e.g., `get Owner()`)
+- Custom static properties
+- All comments and JSDoc you've added
+
+✅ **In index.ts:**
+- Custom exports you've manually added
+
+#### What Gets Regenerated
+
+🔄 **Always regenerated from Salesforce metadata:**
+- Standard field properties in the interface
+- Standard getters (`get FieldName()`)
+- Standard setters (`set FieldName()`) for updateable fields
+- `objectName`, `dateFields`, `dateTimeFields` static properties
+- Base `Model` import
+
+#### Best Practices
+
+1. **Run scaffold incrementally** - When Salesforce fields change, just re-run scaffold
+2. **Check backups** - Review `.backup.*` files if something goes wrong
+3. **Use `--force` carefully** - Only when you want to completely reset a model
+4. **Commit before scaffolding** - Use git to track changes and revert if needed
+
 ### What Gets Generated
 
 For each Salesforce object, the CLI generates:
@@ -246,7 +352,8 @@ For each Salesforce object, the CLI generates:
   ├── Account.ts
   ├── Contact.ts
   ├── Opportunity.ts
-  └── index.ts
+  ├── index.ts
+  └── (backup files when updating)
 ```
 
 **Generated model example** (`Account.ts`):
@@ -300,7 +407,7 @@ export class Account extends Model<AccountData> {
 | Command | Description | Options |
 |---------|-------------|---------|
 | `sfc init` | Create `.sfconnect.json` config file | `-o, --output <path>` - Config file path |
-| `sfc scaffold <objects...>` | Generate TypeScript models from Salesforce metadata | `-o, --output <dir>` - Output directory (default: `./src/models`)<br>`-c, --config <path>` - Config file path<br>`--no-comments` - Skip JSDoc comments |
+| `sfc scaffold <objects...>` | Generate TypeScript models from Salesforce metadata | `-o, --output <dir>` - Output directory (default: `./src/models`)<br>`-c, --config <path>` - Config file path<br>`--no-comments` - Skip JSDoc comments<br>`--force` - Force regenerate (overwrites custom code)<br>`--no-backup` - Skip creating backup files |
 | `sfc test-auth` | Test JWT authentication | `-c, --config <path>` - Config file path |
 
 ### Using Generated Models
