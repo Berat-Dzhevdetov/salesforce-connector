@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { ConfigManager, SFConnectConfig } from './ConfigManager';
+import { ConfigManager } from './ConfigManager';
 import { AuthHelper } from './AuthHelper';
 import { SalesforceConfig } from '../core/SalesforceConfig';
 import { MetadataFetcher } from '../generators/MetadataFetcher';
 import { ModelGenerator, ModelGeneratorOptions } from '../generators/ModelGenerator';
+import { ModelMerger, MergeResult } from '../generators/ModelMerger';
+import { IndexMerger } from '../generators/IndexMerger';
 import { ObserverGenerator } from '../generators/ObserverGenerator';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -76,6 +78,8 @@ program
   .option('-o, --output <dir>', 'Output directory for generated models', './src/models')
   .option('-c, --config <path>', 'Path to .sfconnect.json file')
   .option('--no-comments', 'Skip field comments')
+  .option('--force', 'Force regenerate models (ignore existing files and custom code)')
+  .option('--no-backup', 'Skip creating backup files when updating existing models')
   .action(async (objects: string[], options) => {
     try {
       console.log('Salesforce Model Generator\n');
@@ -112,6 +116,9 @@ program
 
       let successCount = 0;
       let failCount = 0;
+      let updatedCount = 0;
+      let preservedCount = 0;
+      const mergeResults: Map<string, MergeResult> = new Map();
 
       for (const objectName of objects) {
         try {
@@ -120,11 +127,40 @@ program
           // Fetch metadata
           const metadata = await MetadataFetcher.describe(objectName);
 
-          // Generate model code
-          const modelCode = ModelGenerator.generate(metadata, generatorOptions);
+          const filePath = path.join(outputDir, `${objectName}.ts`);
+          const fileExists = fs.existsSync(filePath);
+
+          let modelCode: string;
+          let mergeResult: MergeResult | undefined;
+
+          // Create backup for existing files (unless --no-backup is specified)
+          if (fileExists && options.backup !== false) {
+            try {
+              const backupPath = ModelMerger.createBackup(filePath);
+              console.log(`\n    Backup: ${path.basename(backupPath)}`);
+            } catch (backupError) {
+              console.warn(`\n    Warning: Could not create backup: ${backupError}`);
+            }
+          }
+
+          if (fileExists && !options.force) {
+            // File exists, use smart merge
+            mergeResult = ModelMerger.merge(filePath, metadata, generatorOptions);
+            modelCode = mergeResult.code;
+            mergeResults.set(objectName, mergeResult);
+
+            if (mergeResult.hasChanges) {
+              updatedCount++;
+            }
+            if (mergeResult.customCodePreserved) {
+              preservedCount++;
+            }
+          } else {
+            // Generate new file (or force regenerate)
+            modelCode = ModelGenerator.generate(metadata, generatorOptions);
+          }
 
           // Write to file
-          const filePath = path.join(outputDir, `${objectName}.ts`);
           fs.writeFileSync(filePath, modelCode, 'utf-8');
 
           console.log('✓');
@@ -137,20 +173,26 @@ program
         }
       }
 
-      // Generate index file
+      // Generate/update index file
       if (successCount > 0) {
-        console.log('\nGenerating index file...');
+        console.log('\nUpdating index file...');
         const indexPath = path.join(outputDir, 'index.ts');
-        const indexContent = objects
-          .filter((obj) => {
-            // Only include successfully generated models
-            return fs.existsSync(path.join(outputDir, `${obj}.ts`));
-          })
-          .map((obj) => `export { ${obj} } from './${obj}';`)
-          .join('\n');
 
-        fs.writeFileSync(indexPath, indexContent + '\n', 'utf-8');
-        console.log('✓ index.ts\n');
+        const successfulObjects = objects.filter((obj) => {
+          // Only include successfully generated models
+          return fs.existsSync(path.join(outputDir, `${obj}.ts`));
+        });
+
+        const indexResult = IndexMerger.merge(indexPath, successfulObjects);
+        fs.writeFileSync(indexPath, indexResult.code, 'utf-8');
+
+        if (indexResult.addedExports.length > 0) {
+          console.log(`✓ Added ${indexResult.addedExports.length} export(s) to index.ts`);
+        }
+        if (indexResult.preservedExports.length > 0) {
+          console.log(`✓ Preserved ${indexResult.preservedExports.length} custom export(s)`);
+        }
+        console.log();
       }
 
       // Summary
@@ -158,13 +200,43 @@ program
       console.log(`Total: ${objects.length}`);
       console.log(`Success: ${successCount}`);
       console.log(`Failed: ${failCount}`);
+      if (updatedCount > 0) {
+        console.log(`Updated: ${updatedCount}`);
+      }
+      if (preservedCount > 0) {
+        console.log(`Custom code preserved: ${preservedCount}`);
+      }
       console.log(`\nModels saved to: ${outputDir}`);
+
+      // Show field changes if any
+      if (mergeResults.size > 0) {
+        let hasFieldChanges = false;
+        for (const [objectName, result] of mergeResults) {
+          if (result.addedFields.length > 0 || result.updatedFields.length > 0) {
+            if (!hasFieldChanges) {
+              console.log('\n--- Field Changes ---');
+              hasFieldChanges = true;
+            }
+            console.log(`\n${objectName}:`);
+            if (result.addedFields.length > 0) {
+              console.log(`  Added fields: ${result.addedFields.join(', ')}`);
+            }
+            if (result.updatedFields.length > 0) {
+              console.log(`  Updated fields: ${result.updatedFields.join(', ')}`);
+            }
+          }
+        }
+      }
 
       if (successCount > 0) {
         console.log('\nNext steps:');
-        console.log('1. Review generated models');
+        console.log('1. Review generated/updated models');
         console.log('2. Import related models for relationships');
         console.log('3. Run: npm run build');
+
+        if (options.backup !== false) {
+          console.log('\nNote: Backup files created with .backup.* extension');
+        }
       }
     } catch (error) {
       console.error('\nError:', error instanceof Error ? error.message : error);
