@@ -1,6 +1,6 @@
 import { SalesforceClient } from './SalesforceClient';
 import { SalesforceConfig } from './SalesforceConfig';
-import { SalesforceQueryResponse, QueryOperator } from '../types';
+import { SalesforceQueryResponse, QueryOperator, PaginatedResponse } from '../types';
 
 /**
  * Query builder for constructing and executing SOQL queries
@@ -359,22 +359,32 @@ export class QueryBuilder<T = any> {
   }
 
   /**
+   * Create a copy of this query builder
+   * Useful for creating variations without mutating the original
+   */
+  private copy(): QueryBuilder<T> {
+    const copied = new QueryBuilder<T>(
+      this.objectName,
+      this.modelConstructor,
+      this.dateFields,
+      this.dateTimeFields
+    );
+    copied.selectedFields = [...this.selectedFields];
+    copied.whereClauses = [...this.whereClauses];
+    copied.orderByField = this.orderByField;
+    copied.orderDirection = this.orderDirection;
+    copied.limitValue = this.limitValue;
+    copied.offsetValue = this.offsetValue;
+    return copied;
+  }
+
+  /**
    * Execute the query and return the first result
    */
   public async first(): Promise<T | null> {
     try {
-      // Create a new query builder with limit 1 to avoid mutating this instance
-      const limitedQuery = new QueryBuilder<T>(
-        this.objectName,
-        this.modelConstructor,
-        this.dateFields,
-        this.dateTimeFields
-      );
-      limitedQuery.selectedFields = [...this.selectedFields];
-      limitedQuery.whereClauses = [...this.whereClauses];
-      limitedQuery.orderByField = this.orderByField;
-      limitedQuery.orderDirection = this.orderDirection;
-      limitedQuery.offsetValue = this.offsetValue;
+      // Create a copy with limit 1 to avoid mutating this instance
+      const limitedQuery = this.copy();
       limitedQuery.limitValue = 1;
 
       const results = await limitedQuery.get();
@@ -415,6 +425,63 @@ export class QueryBuilder<T = any> {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Count query execution failed: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Execute the query and return results with pagination metadata
+   * Usage: const { records, totalSize, hasNextPage } = await Account.select('Id', 'Name').paginate(1, 20);
+   * @param page - Page number (1-based, defaults to 1)
+   * @param itemsPerPage - Number of items per page (defaults to 20)
+   */
+  public async paginate(page: number = 1, itemsPerPage: number = 20): Promise<PaginatedResponse<T>> {
+    try {
+      // Validate inputs
+      if (page < 1) {
+        throw new Error('Page number must be 1 or greater');
+      }
+      if (itemsPerPage < 1) {
+        throw new Error('Items per page must be 1 or greater');
+      }
+
+      // Calculate offset from page number (page is 1-based)
+      const offset = (page - 1) * itemsPerPage;
+
+      // Create a copy and set pagination
+      const paginatedQuery = this.copy();
+      paginatedQuery.limitValue = itemsPerPage;
+      paginatedQuery.offsetValue = offset;
+
+      const soql = paginatedQuery.toSOQL();
+      const baseUrl = SalesforceConfig.getApiBaseUrl();
+      const encodedQuery = encodeURIComponent(soql);
+      const url = `${baseUrl}/query?q=${encodedQuery}`;
+
+      const response = await SalesforceClient.get<SalesforceQueryResponse<any>>(url);
+
+      if (!response?.data) {
+        return {
+          records: [],
+          totalSize: 0,
+          hasNextPage: false
+        };
+      }
+
+      const records = response.data.records || [];
+
+      // If a model constructor is provided, instantiate models
+      const mappedRecords = this.modelConstructor
+        ? records.map((record: any) => new this.modelConstructor!(record))
+        : records;
+
+      return {
+        records: mappedRecords,
+        totalSize: response.data.totalSize || 0,
+        hasNextPage: !response.data.done
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Paginated query execution failed: ${errorMessage}`);
     }
   }
 

@@ -25,6 +25,12 @@ export interface SalesforceQueryResponse<T = any> {
   records: T[];
 }
 
+export interface PaginatedResponse<T = any> {
+  records: T[];
+  totalSize: number;
+  hasNextPage: boolean;
+}
+
 export interface SalesforceErrorResponse {
   message: string;
   errorCode: string;
