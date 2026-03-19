@@ -11,6 +11,7 @@ A TypeScript ORM library for Salesforce with an ActiveRecord-style interface. Bu
 - ✅ **ActiveRecord-style ORM** - Intuitive API similar to Rails, Laravel, or TypeORM
 - 🔧 **Automatic Model Generation** - CLI scaffolds TypeScript models from Salesforce metadata
 - 🔍 **Fluent Query Builder** - Type-safe queries with WHERE, JOIN, ORDER BY, LIMIT support
+- 📄 **Smart Pagination** - Built-in pagination with metadata (totalSize, hasNextPage)
 - 🪝 **Lifecycle Hooks (Observers)** - beforeCreate, afterUpdate, beforeDelete, and more
 - 🔗 **Relationship Support** - Eager and lazy loading for lookups and child relationships
 - 📊 **TypeScript First** - Full type safety with auto-generated interfaces
@@ -56,6 +57,16 @@ const accounts = await Account
   .where('Industry', 'Technology')
   .limit(10)
   .get();
+
+// Paginated query with metadata
+const result = await Account
+  .select('Id', 'Name', 'Industry')
+  .where('Industry', 'Technology')
+  .paginate(1, 20); // page 1, 20 items per page
+
+console.log(result.records);      // Account[]
+console.log(result.totalSize);    // Total matching records
+console.log(result.hasNextPage);  // true/false
 
 // Create a record
 const account = await Account.create({
