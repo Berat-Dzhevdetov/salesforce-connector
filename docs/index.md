@@ -628,6 +628,133 @@ const accounts = await Account
   .get();
 ```
 
+### Pagination with Metadata
+
+Use the `paginate()` method to get results along with pagination metadata like total count and whether there are more pages:
+
+```typescript
+// Basic pagination - page 1, 20 items per page
+const result = await Account
+  .select('Id', 'Name', 'Industry')
+  .where('Industry', 'Technology')
+  .paginate(1, 20);
+
+console.log(result.records);        // Array of Account instances
+console.log(result.totalSize);      // Total matching records (e.g., 250)
+console.log(result.hasNextPage);    // true if more pages exist
+
+// Returns:
+// {
+//   records: Account[],
+//   totalSize: number,
+//   hasNextPage: boolean
+// }
+```
+
+**Parameters:**
+- `page` (optional): Page number, 1-based (defaults to 1)
+- `itemsPerPage` (optional): Number of items per page (defaults to 20)
+
+**Building Paginated APIs:**
+
+```typescript
+// Fastify/Express route example
+app.get('/api/accounts', async (request, reply) => {
+  const { page = 1, limit = 20 } = request.query;
+
+  const result = await Account
+    .select('Id', 'Name', 'Industry', 'Website')
+    .where('Industry', 'Technology')
+    .orderBy('Name', 'ASC')
+    .paginate(page, limit);
+
+  return {
+    data: result.records,
+    pagination: {
+      page: page,
+      limit: limit,
+      total: result.totalSize,
+      hasNextPage: result.hasNextPage,
+      hasPreviousPage: page > 1,
+      totalPages: Math.ceil(result.totalSize / limit)
+    }
+  };
+});
+```
+
+**Infinite Scroll Implementation:**
+
+```typescript
+async function loadMoreAccounts(currentOffset: number, pageSize: number = 20) {
+  const page = Math.floor(currentOffset / pageSize) + 1;
+
+  const result = await Account
+    .select('Id', 'Name', 'Industry')
+    .orderBy('CreatedDate', 'DESC')
+    .paginate(page, pageSize);
+
+  return {
+    items: result.records,
+    hasMore: result.hasNextPage,
+    total: result.totalSize,
+    nextOffset: currentOffset + result.records.length
+  };
+}
+```
+
+**Fetching All Pages:**
+
+```typescript
+async function fetchAllPages() {
+  const pageSize = 50;
+  let currentPage = 1;
+  let allRecords: Account[] = [];
+
+  while (true) {
+    const result = await Account
+      .select('Id', 'Name', 'Industry')
+      .where('Industry', 'Technology')
+      .paginate(currentPage, pageSize);
+
+    allRecords = [...allRecords, ...result.records];
+
+    console.log(`Fetched page ${currentPage}, total so far: ${allRecords.length}/${result.totalSize}`);
+
+    if (!result.hasNextPage) {
+      break;
+    }
+
+    currentPage++;
+  }
+
+  return allRecords;
+}
+```
+
+**Comparison: `.get()` vs `.paginate()`:**
+
+```typescript
+// Using .get() - Returns only records
+const accounts = await Account
+  .select('Id', 'Name')
+  .limit(10)
+  .get();
+// Returns: Account[]
+
+// Using .paginate() - Returns records + metadata
+const result = await Account
+  .select('Id', 'Name')
+  .paginate(1, 10);
+// Returns: { records: Account[], totalSize: number, hasNextPage: boolean }
+```
+
+**Important Notes:**
+- `.paginate()` does NOT mutate the query builder - you can reuse the same query
+- Page numbers are 1-based (first page is 1, not 0)
+- `totalSize` represents the total count of matching records across all pages
+- `hasNextPage` is based on Salesforce's `done` flag for accurate pagination
+- You can still use `.where()`, `.orderBy()`, and other query methods before calling `.paginate()`
+
 ### Get First Record
 
 Retrieve only the first matching record:

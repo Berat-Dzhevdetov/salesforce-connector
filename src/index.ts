@@ -18,6 +18,7 @@ export type {
   SalesforceAuthResponse,
   SalesforceQueryResponse,
   SalesforceErrorResponse,
+  PaginatedResponse,
   WhereClause,
   ModelData,
   QueryOperator,
