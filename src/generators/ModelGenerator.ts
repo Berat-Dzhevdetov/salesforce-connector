@@ -18,6 +18,12 @@ export interface ModelGeneratorOptions {
    * Exclude specific fields
    */
   excludeFields?: string[];
+
+  /**
+   * Use legacy Model class instead of LambdaModel (deprecated)
+   * Default: false (use LambdaModel)
+   */
+  useLegacyModel?: boolean;
 }
 
 /**
@@ -114,9 +120,64 @@ export class ModelGenerator {
   }
 
   /**
-   * Generate getter and setter methods for fields
+   * Generate getter methods for LambdaModel (type-safe lambda queries)
    */
-  private static generateAccessors(
+  private static generateLambdaGetters(
+    metadata: SalesforceObjectMetadata,
+    options: ModelGeneratorOptions = {}
+  ): string {
+    const { includeComments = true, includeFields, excludeFields = [] } = options;
+
+    let fields = metadata.fields;
+
+    // Filter fields
+    if (includeFields && includeFields.length > 0) {
+      fields = fields.filter((f) => includeFields.includes(f.name));
+    }
+
+    fields = fields.filter((f) => !excludeFields.includes(f.name));
+
+    let code = '';
+
+    for (const field of fields) {
+      const fieldType = this.mapFieldType(field);
+
+      // For LambdaModel, getters return the actual type (not undefined)
+      // with a fallback to default value
+      let defaultValue: string;
+      switch (fieldType) {
+        case 'string':
+          defaultValue = "''";
+          break;
+        case 'number':
+          defaultValue = '0';
+          break;
+        case 'boolean':
+          defaultValue = 'false';
+          break;
+        case 'Date':
+          defaultValue = 'new Date()';
+          break;
+        default:
+          defaultValue = 'undefined as any';
+      }
+
+      // Getter only (no setters for LambdaModel - use .set() method instead)
+      if (includeComments && field.label) {
+        code += `  /** ${field.label} */\n`;
+      }
+      code += `  get ${field.name}(): ${fieldType} {\n`;
+      code += `    return this.get('${field.name}') || ${defaultValue};\n`;
+      code += `  }\n\n`;
+    }
+
+    return code;
+  }
+
+  /**
+   * Generate getter and setter methods for legacy Model
+   */
+  private static generateLegacyAccessors(
     metadata: SalesforceObjectMetadata,
     options: ModelGeneratorOptions = {}
   ): string {
@@ -166,12 +227,16 @@ export class ModelGenerator {
    * Generate complete model class code
    */
   public static generate(metadata: SalesforceObjectMetadata, options: ModelGeneratorOptions = {}): string {
-    const { includeComments = true, includeFields, excludeFields = [] } = options;
+    const { includeComments = true, includeFields, excludeFields = [], useLegacyModel = false } = options;
 
     let code = '';
 
     // Imports
-    code += `import { Model } from 'javascript-salesforce-connector';\n\n`;
+    if (useLegacyModel) {
+      code += `import { Model } from 'javascript-salesforce-connector';\n\n`;
+    } else {
+      code += `import { LambdaModel } from 'javascript-salesforce-connector';\n\n`;
+    }
 
     // Interface
     code += this.generateInterface(metadata, options);
@@ -183,10 +248,17 @@ export class ModelGenerator {
       if (metadata.custom) {
         code += ` * Custom Object\n`;
       }
+      if (useLegacyModel) {
+        code += ` * \n`;
+        code += ` * ⚠️  This model uses the legacy Model class which is deprecated.\n`;
+        code += ` * Consider migrating to LambdaModel for type-safe queries with closure support.\n`;
+        code += ` * See: https://github.com/Berat-Dzhevdetov/salesforce-connector#migration-guide\n`;
+      }
       code += ` */\n`;
     }
 
-    code += `export class ${metadata.name} extends Model<${metadata.name}Data> {\n`;
+    const baseClass = useLegacyModel ? 'Model' : 'LambdaModel';
+    code += `export class ${metadata.name} extends ${baseClass}<${metadata.name}Data> {\n`;
     code += `  protected static objectName = '${metadata.name}';\n`;
 
     // Generate date and datetime field arrays
@@ -207,8 +279,12 @@ export class ModelGenerator {
     }
     code += '\n';
 
-    // Accessors
-    code += this.generateAccessors(metadata, options);
+    // Accessors - use appropriate generator based on model type
+    if (useLegacyModel) {
+      code += this.generateLegacyAccessors(metadata, options);
+    } else {
+      code += this.generateLambdaGetters(metadata, options);
+    }
 
     code += '}\n';
 

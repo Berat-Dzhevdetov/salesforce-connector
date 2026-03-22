@@ -19,13 +19,21 @@ interface GroupCondition {
 type ConditionNode = LeafCondition | GroupCondition;
 
 /**
- * LambdaParser uses TypeScript AST parsing to convert lambda expressions
- * into Salesforce SOQL query strings.
+ * Parses lambda expressions into Salesforce SOQL queries with full closure variable support.
  *
- * For WHERE clauses, it uses a hybrid approach:
- * 1. Parses field names and operators from source code (reliable)
- * 2. Parses values from source code where possible (literals)
- * 3. For closure variables, uses Node.js Inspector Protocol to access [[Scopes]]
+ * Capabilities:
+ * - Field selection with nested properties (x.BillingAddress.Street)
+ * - WHERE clauses with closure variables (x.Industry === industryVar)
+ * - Subqueries with closure support in filters
+ * - String methods (includes, startsWith, endsWith) → LIKE clauses
+ *
+ * Closure variables work with:
+ * - Simple variables: const industry = 'Tech'
+ * - Object properties: config.industry
+ * - Nested properties: filters.account.industry
+ *
+ * Technical: Uses TypeScript AST (ts-morph) for parsing and Node.js Inspector
+ * Protocol for closure variable extraction at runtime.
  */
 export class LambdaParser {
   private project: Project;
@@ -43,9 +51,18 @@ export class LambdaParser {
   }
 
   /**
-   * Parses a selector lambda and returns a mapping of aliases to field paths
-   * Example: (x) => ({ Name: x.Name, Street: x.Address.Street })
-   * Returns: { Name: "Name", Street: "Address.Street" }
+   * Parses a selector lambda and returns a mapping of aliases to field paths.
+   * Also captures subquery WHERE functions to preserve closure variable context.
+   *
+   * Examples:
+   * - Simple fields: (x) => ({ Name: x.Name, Street: x.Address.Street })
+   *   Returns: { Name: "Name", Street: "Address.Street" }
+   *
+   * - Subqueries: (x) => ({ Contacts: x.Contacts.select(c => ({ Name: c.Name })) })
+   *   Returns: { Contacts: "(SELECT Name FROM Contacts)" }
+   *
+   * - Subqueries with closures: (x) => ({ ... x.Contacts.where(c => c.Active === activeVar) ... })
+   *   Captures WHERE function to preserve closure access
    */
   parseSelector<T, R>(fn: (x: T) => R): Record<keyof R, string> {
     // First, capture WHERE functions from subqueries by executing with proxy
@@ -182,8 +199,19 @@ export class LambdaParser {
   }
 
   /**
-   * Parses a WHERE condition lambda and returns SOQL WHERE clause
-   * Supports closure variables via Inspector Protocol
+   * Parses a WHERE condition lambda into a SOQL WHERE clause.
+   *
+   * Supports:
+   * - Literal values: x.Industry === 'Technology'
+   * - Closure variables: x.Industry === industryVar
+   * - Object properties: x.Revenue > config.minRevenue
+   * - Nested properties: x.City === filters.location.city
+   * - String methods: x.Name.includes('Acme')
+   * - Complex logic: (x.A === 'X' || x.B === 'Y') && x.C > 100
+   *
+   * Closure variables are extracted at runtime using Node.js Inspector API.
+   *
+   * @throws Error if the lambda cannot be parsed
    */
   parseWhere<T = any>(fn: (x: T) => boolean): string {
     try {
@@ -196,8 +224,12 @@ export class LambdaParser {
   }
 
   /**
-   * Parses WHERE condition from a Node (used for subqueries)
-   * Now uses captured WHERE functions from proxy execution
+   * Parses WHERE condition from an AST Node (used for subqueries).
+   *
+   * First attempts to use captured WHERE function (preserves closure context),
+   * falls back to AST-only parsing if unavailable (no closure support).
+   *
+   * @param relationshipName - Used to lookup captured WHERE function
    */
   parseWhereFromNode(arrowFunction: Node, relationshipName?: string): string {
     if (!Node.isArrowFunction(arrowFunction)) {
@@ -544,7 +576,11 @@ export class LambdaParser {
 
   /**
    * Executes the selector function with a proxy to capture WHERE functions from subqueries.
-   * This allows us to access closure variables in subquery WHERE clauses.
+   * This preserves closure variable context for subquery filters.
+   *
+   * The proxy intercepts relationship access (e.g., x.Contacts.select().where())
+   * and captures the WHERE function before it's converted to a string, ensuring
+   * closure variables remain accessible via Inspector Protocol.
    */
   private captureSubqueryWhereFunctions<T, R>(fn: (x: T) => R): void {
     this.capturedWhereFunctions.clear();
@@ -555,7 +591,7 @@ export class LambdaParser {
 
         // Return a mock SubqueryBuilder that captures WHERE functions
         return {
-          select: (selectFn: any) => {
+          select: () => {
             const subqueryBuilder = {
               where: (whereFn: Function) => {
                 // Capture the WHERE function with closure context
@@ -589,29 +625,51 @@ export class LambdaParser {
    */
   private buildConditionTree<T = any>(fn: (x: T) => boolean): ConditionNode {
     const src = fn.toString();
-    const param = this.extractParam(src);
 
-    if (!param) {
-      throw new Error('Could not extract parameter name from lambda function');
+    const sourceFile = this.project.createSourceFile(
+      `temp-tree-${Date.now()}.ts`,
+      `const tempFn = ${src}`,
+      { overwrite: true }
+    );
+
+    try {
+      const arrowFunction = sourceFile
+        .getVariableDeclaration('tempFn')
+        ?.getInitializerIfKindOrThrow(SyntaxKind.ArrowFunction);
+
+      if (!arrowFunction) {
+        throw new Error('Could not find arrow function');
+      }
+
+      const parameter = arrowFunction.getParameters()[0];
+      if (!parameter) {
+        throw new Error('Arrow function must have a parameter');
+      }
+      const paramName = parameter.getName();
+
+      const body = arrowFunction.getBody();
+      let expression;
+
+      if (Node.isBlock(body)) {
+        const returnStatement = body.getStatements()[0];
+        if (Node.isReturnStatement(returnStatement)) {
+          expression = returnStatement.getExpression();
+        }
+      } else {
+        expression = body;
+      }
+
+      if (!expression) {
+        throw new Error('Could not extract lambda body expression');
+      }
+
+      // Build the full condition tree with field names and values using ts-morph AST
+      return this.buildConditionFromExpression(expression, paramName, fn);
+    } finally {
+      this.project.removeSourceFile(sourceFile);
     }
-
-    // Parse structure from source to understand AND/OR logic
-    const structure = this.parseLogicalStructure(src);
-
-    // Collect actual values by executing with proxy + parsing source
-    const leaves = this.collectLeaves(fn, param);
-
-    // Merge structure with actual values
-    return this.fillLeaves(structure, leaves);
   }
 
-  /**
-   * Extracts parameter name from lambda function source
-   */
-  private extractParam(src: string): string {
-    const match = src.match(/^\s*\(?\s*(\w+)\s*(?::\s*[\w<>\[\]|& .]+)?\s*\)?\s*=>/);
-    return match ? match[1] : '';
-  }
 
   /**
    * Extracts the body of the lambda function
@@ -621,42 +679,25 @@ export class LambdaParser {
     return arrowMatch ? arrowMatch[1].trim() : '';
   }
 
-  /**
-   * Collects all leaf conditions
-   */
-  private collectLeaves<T = any>(fn: (x: T) => boolean, param: string): LeafCondition[] {
-    const leaves: LeafCondition[] = [];
-    const src = fn.toString();
-    const fieldOps = this.parseFieldOperatorPairs(src, param);
-
-    // For each field-operator pair, extract the value
-    for (const { field, op, isMethod, rhsExpr } of fieldOps) {
-      if (isMethod) {
-        // Execute function to capture method argument
-        const value = this.captureMethodValue(fn, field);
-        leaves.push({ kind: "leaf", field, operator: op, value });
-      } else {
-        // Parse value from source (handles literals only)
-        let value = this.parseValueFromSource(rhsExpr);
-
-        // If value is undefined (closure variable), try to capture it via execution
-        if (value === undefined) {
-          // Pass the rhsExpr as the variable name to extract
-          value = this.captureClosureValue(fn, rhsExpr.trim());
-        }
-
-        leaves.push({ kind: "leaf", field, operator: op, value });
-      }
-    }
-
-    return leaves;
-  }
 
   /**
    * Attempts to capture a closure variable value using Node.js Inspector Protocol.
    *
-   * Uses the V8 Inspector to access the function's [[Scopes]] internal property,
-   * which contains all closure variables accessible to the function.
+   * Accesses the function's [[Scopes]] internal property via V8 Inspector API
+   * to extract closure variable values at runtime.
+   *
+   * Supports:
+   * - Simple variables: varName
+   * - Object properties: obj.prop
+   * - Nested properties: obj.nested.deep.value
+   *
+   * Limitations:
+   * - Synchronous execution only (uses blocking Inspector calls)
+   * - Returns undefined if Inspector protocol unavailable or variable not found
+   * - Fails silently - no exceptions thrown
+   *
+   * @param varName - Variable name or property path (e.g., "config.industry")
+   * @returns The variable value, or undefined if not accessible
    */
   private captureClosureValue<T = any>(fn: (x: T) => boolean, varName: string): unknown {
     try {
@@ -927,7 +968,8 @@ export class LambdaParser {
     const allMatches: Array<{ index: number; field: string; op: Operator; isMethod: boolean; rhsExpr: string }> = [];
 
     // Find method calls (includes, startsWith, endsWith)
-    const methodRegex = new RegExp(`${param}\\.(\\w+)\\.(includes|startsWith|endsWith)\\(([^)]+)\\)`, 'g');
+    // Use [a-zA-Z0-9_]+ to properly match Salesforce custom field names (e.g., Active__c)
+    const methodRegex = new RegExp(`${param}\\.([a-zA-Z0-9_]+)\\.(includes|startsWith|endsWith)\\(([^)]+)\\)`, 'g');
     let match;
     while ((match = methodRegex.exec(body)) !== null) {
       allMatches.push({
@@ -939,9 +981,54 @@ export class LambdaParser {
       });
     }
 
+    // Find negated boolean fields: !x.IsActive or !x.Active__c
+    // Matches: !param.FieldName (where it's NOT followed by an operator)
+    // Use [a-zA-Z0-9_]+ to match field names with underscores (like Active__c)
+    const negatedBooleanRegex = new RegExp(
+      `!${param}\\.([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)*)(?!\\s*(?:===|!==|==|!=|>=|<=|>|<|\\.))`,'g'
+    );
+    let negMatch: RegExpExecArray | null;
+    while ((negMatch = negatedBooleanRegex.exec(body)) !== null) {
+      allMatches.push({
+        index: negMatch.index,
+        field: negMatch[1],
+        op: "=",
+        isMethod: false,
+        rhsExpr: 'false',  // !x.IsActive means IsActive = false
+      });
+    }
+
+    // Note: Standalone boolean detection is commented out for now as it conflicts with other patterns
+    // It's better to require explicit comparisons: x.Active__c === true
+    // We may add this back with a more sophisticated approach later
+
+    // Find standalone boolean fields: x.IsActive (truthy check)
+    // Only match when it's clearly a standalone boolean check (preceded by && or || or at start or opening paren, followed by && or || or end or closing paren)
+    // This very conservative approach avoids breaking existing functionality
+    const standaloneBooleanRegex = new RegExp(
+      `(?:^|&&|\\|\\||\\()\\s*${param}\\.([a-zA-Z0-9_]+)\\s*(?:&&|\\|\\||\\)|$)`,
+      'g'
+    );
+    let boolMatch: RegExpExecArray | null;
+    while ((boolMatch = standaloneBooleanRegex.exec(body)) !== null) {
+      // Skip if this is already matched by comparison or method regex
+      const alreadyMatched = allMatches.some(m =>
+        Math.abs(m.index - boolMatch!.index) < 30
+      );
+      if (!alreadyMatched) {
+        allMatches.push({
+          index: boolMatch.index,
+          field: boolMatch[1],
+          op: "=",
+          isMethod: false,
+          rhsExpr: 'true',  // x.IsActive means IsActive = true
+        });
+      }
+    }
+
     // Find comparison operators
     const comparisonRegex = new RegExp(
-      `${param}\\.(\\w+(?:\\.\\w+)*)\\s*(===|!==|==|!=|>=|<=|>|<)\\s*([^&|()]+?)(?=\\s*(?:&&|\\|\\||\\)|$))`,
+      `${param}\\.([a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)*)\\s*(===|!==|==|!=|>=|<=|>|<)\\s*([^&|()]+?)(?=\\s*(?:&&|\\|\\||\\)|$))`,
       'g'
     );
     while ((match = comparisonRegex.exec(body)) !== null) {
@@ -978,24 +1065,215 @@ export class LambdaParser {
   }
 
   /**
-   * Parses the logical structure (AND/OR tree) from source text
+   * Builds a complete ConditionNode tree with field names and values from a ts-morph expression
    */
-  private parseLogicalStructure(src: string): ConditionNode {
-    const body = this.extractBody(src);
-
-    // Split on || first (lowest precedence)
-    const orParts = this.splitOnOperator(body, '||');
-
-    if (orParts.length === 1) {
-      return this.parseAndGroup(orParts[0]);
+  private buildConditionFromExpression<T = any>(expr: Node, paramName: string, fn: (x: T) => boolean): ConditionNode {
+    // Handle parenthesized expressions
+    if (Node.isParenthesizedExpression(expr)) {
+      return this.buildConditionFromExpression(expr.getExpression(), paramName, fn);
     }
 
-    return {
-      kind: "group",
-      logic: "OR",
-      conditions: orParts.map((part) => this.parseAndGroup(part)),
-    };
+    // Handle binary expressions (AND, OR, comparisons)
+    if (Node.isBinaryExpression(expr)) {
+      const operator = expr.getOperatorToken().getText();
+
+      // Logical operators
+      if (operator === '&&') {
+        return {
+          kind: "group",
+          logic: "AND",
+          conditions: [
+            this.buildConditionFromExpression(expr.getLeft(), paramName, fn),
+            this.buildConditionFromExpression(expr.getRight(), paramName, fn)
+          ]
+        };
+      } else if (operator === '||') {
+        return {
+          kind: "group",
+          logic: "OR",
+          conditions: [
+            this.buildConditionFromExpression(expr.getLeft(), paramName, fn),
+            this.buildConditionFromExpression(expr.getRight(), paramName, fn)
+          ]
+        };
+      }
+
+      // Comparison operators - extract field, operator, and value
+      const left = expr.getLeft();
+      const right = expr.getRight();
+
+      // Get field name from left side (e.g., x.Field or x.Field.SubField)
+      const fieldName = this.extractFieldNameFromExpression(left, paramName);
+      if (!fieldName) {
+        return { kind: "leaf", field: "", operator: "=", value: null };
+      }
+
+      // Get operator
+      const soqlOperator = this.jsOperatorToSOQL(operator);
+
+      // Get value from right side
+      const value = this.extractValueFromExpression(right, fn);
+
+      return {
+        kind: "leaf",
+        field: fieldName,
+        operator: soqlOperator,
+        value
+      };
+    }
+
+    // Handle prefix unary expressions (negation: !x.Field)
+    if (Node.isPrefixUnaryExpression(expr)) {
+      const operator = expr.getOperatorToken();
+      if (operator === SyntaxKind.ExclamationToken) {
+        const operand = expr.getOperand();
+
+        // Handle !x.Field (negated boolean)
+        if (Node.isPropertyAccessExpression(operand)) {
+          const fieldName = this.extractFieldNameFromExpression(operand, paramName);
+          if (fieldName) {
+            return {
+              kind: "leaf",
+              field: fieldName,
+              operator: "=",
+              value: false
+            };
+          }
+        }
+
+        // Handle !(x.Field === value) - though this is rare
+        return this.buildConditionFromExpression(operand, paramName, fn);
+      }
+    }
+
+    // Handle property access (standalone boolean: x.Field)
+    if (Node.isPropertyAccessExpression(expr)) {
+      const fieldName = this.extractFieldNameFromExpression(expr, paramName);
+      if (fieldName) {
+        return {
+          kind: "leaf",
+          field: fieldName,
+          operator: "=",
+          value: true
+        };
+      }
+    }
+
+    // Handle call expressions (methods like x.Field.includes('value'))
+    if (Node.isCallExpression(expr)) {
+      const callExpr = expr.getExpression();
+      if (Node.isPropertyAccessExpression(callExpr)) {
+        const methodName = callExpr.getName();
+        const object = callExpr.getExpression();
+
+        if (Node.isPropertyAccessExpression(object)) {
+          const fieldName = this.extractFieldNameFromExpression(object, paramName);
+
+          if (fieldName) {
+            // Get the argument value
+            const args = expr.getArguments();
+            if (args.length > 0) {
+              const value = this.extractValueFromExpression(args[0], fn);
+
+              // Handle different string methods
+              if (methodName === 'includes') {
+                return {
+                  kind: "leaf",
+                  field: fieldName,
+                  operator: "LIKE",
+                  value: `%${value}%`
+                };
+              } else if (methodName === 'startsWith') {
+                return {
+                  kind: "leaf",
+                  field: fieldName,
+                  operator: "LIKE",
+                  value: `${value}%`
+                };
+              } else if (methodName === 'endsWith') {
+                return {
+                  kind: "leaf",
+                  field: fieldName,
+                  operator: "LIKE",
+                  value: `%${value}`
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Default: return placeholder leaf
+    return { kind: "leaf", field: "", operator: "=", value: null };
   }
+
+  /**
+   * Extracts a field name from a property access expression (e.g., x.Field or x.Field.SubField)
+   */
+  private extractFieldNameFromExpression(expr: Node, paramName: string): string | null {
+    if (Node.isPropertyAccessExpression(expr)) {
+      const parts: string[] = [];
+      let current: Node = expr;
+
+      while (Node.isPropertyAccessExpression(current)) {
+        parts.unshift(current.getName());
+        current = current.getExpression();
+      }
+
+      // Check if the base is the parameter name
+      if (Node.isIdentifier(current) && current.getText() === paramName) {
+        return parts.join('.');
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extracts a value from an expression (literal, identifier for closure variable, or computed)
+   */
+  private extractValueFromExpression<T = any>(expr: Node, fn: (x: T) => boolean): unknown {
+    // Handle literals
+    if (Node.isStringLiteral(expr)) {
+      return expr.getLiteralText();
+    }
+    if (Node.isNumericLiteral(expr)) {
+      return Number(expr.getLiteralText());
+    }
+    if (expr.getKind() === SyntaxKind.TrueKeyword) {
+      return true;
+    }
+    if (expr.getKind() === SyntaxKind.FalseKeyword) {
+      return false;
+    }
+    if (expr.getKind() === SyntaxKind.NullKeyword) {
+      return null;
+    }
+
+    // Handle identifiers (closure variables)
+    if (Node.isIdentifier(expr)) {
+      const varName = expr.getText();
+      return this.captureClosureValue(fn, varName);
+    }
+
+    // Handle property access (e.g., obj.prop)
+    if (Node.isPropertyAccessExpression(expr)) {
+      const text = expr.getText();
+      return this.captureClosureValue(fn, text);
+    }
+
+    // Handle template expressions
+    if (Node.isTemplateExpression(expr)) {
+      // Try to evaluate the template
+      const text = expr.getText();
+      return this.captureClosureValue(fn, text);
+    }
+
+    // Default: try to capture as closure
+    return this.captureClosureValue(fn, expr.getText());
+  }
+
 
   /**
    * Parses an AND group
@@ -1004,14 +1282,48 @@ export class LambdaParser {
     const andParts = this.splitOnOperator(expr, '&&');
 
     if (andParts.length === 1) {
-      // Single condition - return a placeholder leaf
+      // Single condition - could be a leaf or a grouped OR expression
+      // Strip parentheses and check if it contains OR
+      const trimmed = expr.trim();
+      if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+        // Remove outer parentheses and recursively parse
+        const inner = trimmed.slice(1, -1);
+        return this.parseOrGroup(inner);
+      }
+      // Single leaf condition
       return { kind: "leaf", field: "", operator: "=", value: null };
     }
 
     return {
       kind: "group",
       logic: "AND",
-      conditions: andParts.map(() => ({ kind: "leaf", field: "", operator: "=", value: null } as ConditionNode)),
+      conditions: andParts.map((part) => {
+        // Recursively parse each AND part (which might contain OR)
+        const trimmed = part.trim();
+        if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+          const inner = trimmed.slice(1, -1);
+          return this.parseOrGroup(inner);
+        }
+        return { kind: "leaf", field: "", operator: "=", value: null };
+      }),
+    };
+  }
+
+  /**
+   * Parses an OR group
+   */
+  private parseOrGroup(expr: string): ConditionNode {
+    const orParts = this.splitOnOperator(expr, '||');
+
+    if (orParts.length === 1) {
+      // Single condition - could be AND group or leaf
+      return this.parseAndGroup(orParts[0]);
+    }
+
+    return {
+      kind: "group",
+      logic: "OR",
+      conditions: orParts.map((part) => this.parseAndGroup(part)),
     };
   }
 
@@ -1053,26 +1365,6 @@ export class LambdaParser {
     return parts.length > 0 ? parts : [expr];
   }
 
-  /**
-   * Fills the structure tree with actual values from leaves array
-   */
-  private fillLeaves(node: ConditionNode, leaves: LeafCondition[]): ConditionNode {
-    let leafIndex = 0;
-
-    const fill = (n: ConditionNode): ConditionNode => {
-      if (n.kind === "leaf") {
-        const resolved = leaves[leafIndex++];
-        return resolved ?? n;
-      }
-
-      return {
-        ...n,
-        conditions: n.conditions.map(fill),
-      };
-    };
-
-    return fill(node);
-  }
 
   /**
    * Converts a condition tree to SOQL string
@@ -1087,6 +1379,10 @@ export class LambdaParser {
       const sql = this.conditionToSOQL(child);
       // Wrap AND groups inside an OR in parentheses
       if (node.logic === "OR" && child.kind === "group" && child.logic === "AND") {
+        return `(${sql})`;
+      }
+      // Wrap OR groups inside an AND in parentheses
+      if (node.logic === "AND" && child.kind === "group" && child.logic === "OR") {
         return `(${sql})`;
       }
       return sql;

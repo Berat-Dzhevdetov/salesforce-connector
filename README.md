@@ -1,50 +1,104 @@
 [![Publish to NPM](https://github.com/Berat-Dzhevdetov/salesforce-connector/actions/workflows/publish.yml/badge.svg)](https://github.com/Berat-Dzhevdetov/salesforce-connector/actions/workflows/publish.yml)
 [![Test](https://github.com/Berat-Dzhevdetov/salesforce-connector/actions/workflows/test.yml/badge.svg)](https://github.com/Berat-Dzhevdetov/salesforce-connector/actions/workflows/test.yml)
 
+> ⚠️ **DEPRECATION NOTICE**: The string-based `Model` class and `QueryBuilder` are **deprecated** and will be removed in **v2.0.0**. Please migrate to `LambdaModel` for type-safe queries with closure variable support. [See Migration Guide](https://berat-dzhevdetov.github.io/salesforce-connector/migration-guide).
+
 # Salesforce ORM
 
-A TypeScript ORM library for Salesforce with **lambda-based queries**, full type inference, and closure variable support. Build type-safe Salesforce integrations with automatic model generation and lifecycle hooks.
+A TypeScript ORM library for Salesforce with **lambda-based queries**, full type inference, and closure variable support.
 
-📚 **[Full Documentation](https://berat-dzhevdetov.github.io/salesforce-connector/)** | 🆕 **[LambdaModel Guide](https://berat-dzhevdetov.github.io/salesforce-connector/lambda-model)** | 🔄 **[Migration Guide](https://berat-dzhevdetov.github.io/salesforce-connector/migration-guide)**
+📚 **[Full Documentation](https://berat-dzhevdetov.github.io/salesforce-connector/)** | 🆕 **[LambdaModel Guide](https://berat-dzhevdetov.github.io/salesforce-connector/querying/lambda-queries)** | 🔄 **[Migration Guide](https://berat-dzhevdetov.github.io/salesforce-connector/migration-guide)**
 
-## ✨ What's New: LambdaModel
+## ✨ Core Features
 
-**Type-safe queries with closure variable support!**
+### 🎯 Type-Safe Lambda Queries
+
+Write queries with full IntelliSense and compile-time type checking:
 
 ```typescript
-// Define your model with full type safety
+// Define your model
 class Account extends LambdaModel<AccountData> {
   protected static objectName = 'Account';
 }
 
-// Query with IntelliSense and closure variables
-const industry = 'Technology';
-const minRevenue = 1000000;
-
+// Query with type safety
 const accounts = await Account
   .select(x => ({
     Id: x.Id,           // ✓ IntelliSense works!
     Name: x.Name,       // ✓ Typos caught at compile time
     Industry: x.Industry
   }))
-  .where(x => x.Industry === industry && x.AnnualRevenue > minRevenue)  // ✓ Closures work!
-  .orderBy(x => x.AnnualRevenue, 'DESC')
   .limit(10)
   .get();
 ```
 
-**[👉 See LambdaModel Guide](https://berat-dzhevdetov.github.io/salesforce-connector/lambda-model)**
+### 🔗 Closure Variable Support
 
-## Features
+Use variables from outer scope naturally:
 
-- 🎯 **Lambda-Based Queries** - Full IntelliSense with closure variable support (NEW!)
-- 📊 **100% Type-Safe** - Catch errors at compile time, not runtime
-- 🔧 **Automatic Model Generation** - CLI scaffolds TypeScript models from Salesforce metadata
-- 🔍 **Fluent Query Builder** - Chainable API with WHERE, JOIN, ORDER BY, LIMIT
-- 📄 **Smart Pagination** - Built-in pagination with metadata (totalSize, hasNextPage)
-- 🔗 **Relationship Support** - Query subqueries with full closure support
-- 🪝 **Lifecycle Hooks** - beforeCreate, afterUpdate, beforeDelete, and more
-- ⚡ **Zero Dependencies** - Lightweight with minimal external dependencies
+```typescript
+const industry = 'Technology';
+const minRevenue = 1000000;
+
+const accounts = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name }))
+  .where(x => x.Industry === industry && x.AnnualRevenue > minRevenue)
+  .get();
+```
+
+### 🌳 Relationship Queries with Closures
+
+Query subqueries with full closure support:
+
+```typescript
+const activeStatus = true;
+
+const accounts = await Account
+  .select(x => ({
+    Name: x.Name,
+    ActiveContacts: x.Contacts
+      .select(c => ({ Name: c.Name, Email: c.Email }))
+      .where(c => c.Active__c === activeStatus)  // ✓ Closures work in subqueries!
+  }))
+  .get();
+```
+
+### 🔧 Automatic Model Generation
+
+Generate TypeScript models from Salesforce metadata:
+
+```bash
+# Initialize configuration
+npx sfc init
+
+# Generate models with full type safety
+npx sfc scaffold Account Contact Opportunity
+```
+
+### 🪝 Lifecycle Hooks (Observers)
+
+React to model events without modifying model classes:
+
+```typescript
+class AuditLogObserver implements Observer<Account> {
+  async afterCreate(account: Account) {
+    console.log(`Account created: ${account.Id}`);
+  }
+}
+
+Account.observe(new AuditLogObserver());
+```
+
+### 📄 Smart Pagination
+
+Built-in pagination with metadata:
+
+```typescript
+const { records, totalSize, hasNextPage } = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name }))
+  .where(x => x.Industry === 'Technology')
+  .paginate(1, 20);  // Page 1, 20 per page
+```
 
 ## Quick Start
 
@@ -54,20 +108,7 @@ const accounts = await Account
 npm install javascript-salesforce-connector
 ```
 
-### Initialize Configuration
-
-```bash
-# Initialize config file
-npx sfc init
-
-# Test authentication
-npx sfc test-auth
-
-# Generate models from Salesforce
-npx sfc scaffold Account Contact Opportunity
-```
-
-### Basic Usage (LambdaModel - Recommended)
+### Basic Usage
 
 ```typescript
 import { SalesforceConfig, LambdaModel } from 'javascript-salesforce-connector';
@@ -80,23 +121,13 @@ SalesforceConfig.initialize({
 });
 SalesforceConfig.setAccessToken('your-access-token');
 
-// Query with closure variables and type safety
+// Query with type safety
 const industry = 'Technology';
 const accounts = await Account
-  .select(x => ({
-    Id: x.Id,
-    Name: x.Name,
-    Industry: x.Industry
-  }))
-  .where(x => x.Industry === industry)  // Closure variable works!
+  .select(x => ({ Id: x.Id, Name: x.Name, Industry: x.Industry }))
+  .where(x => x.Industry === industry)
   .limit(10)
   .get();
-
-// Paginated query
-const { records, totalSize, hasNextPage } = await Account
-  .select(x => ({ Id: x.Id, Name: x.Name }))
-  .where(x => x.Industry === industry)
-  .paginate(1, 20); // page 1, 20 items per page
 
 // Create a record
 const account = await Account.create({
@@ -112,171 +143,44 @@ await account.save();
 await account.delete();
 ```
 
-### Legacy Usage (Deprecated)
-
-> ⚠️ **Deprecation Notice**: String-based queries are deprecated. Please migrate to LambdaModel. [See Migration Guide](https://berat-dzhevdetov.github.io/salesforce-connector/migration-guide).
-
-<details>
-<summary>Click to see legacy syntax</summary>
-
-```typescript
-// Old way (will be removed in v2.0)
-const accounts = await Account
-  .select('Id', 'Name', 'Industry')
-  .where('Industry', 'Technology')
-  .limit(10)
-  .get();
-```
-
-</details>
-
-## Core Features
-
-### 🔧 CLI Model Generator
-
-Automatically generate TypeScript models with full type safety:
-
-```bash
-npx sfc scaffold Account Contact Opportunity -o ./models
-```
-
-**[📖 Learn more about Model Generation](https://berat-dzhevdetov.github.io/salesforce-connector/#model-generation-cli)**
-
-### 🔍 Query Builder
-
-Build complex SOQL queries with a fluent, type-safe API:
-
-```typescript
-const accounts = await Account
-  .select('Id', 'Name', 'Owner.Name')
-  .where('AnnualRevenue', '>', 1000000)
-  .whereIn('Industry', ['Technology', 'Finance'])
-  .orderBy('CreatedDate', 'DESC')
-  .limit(20)
-  .get();
-```
-
-**[📖 View all query methods](https://berat-dzhevdetov.github.io/salesforce-connector/#query-operations)**
-
-### 🪝 Lifecycle Hooks (Observers)
-
-Respond to model events without modifying model classes:
-
-```typescript
-class AuditLogObserver implements Observer<Account> {
-  async afterCreate(account: Account) {
-    console.log(`Account created: ${account.Id}`);
-  }
-}
-
-Account.observe(new AuditLogObserver());
-```
-
-Generate observers with CLI:
-```bash
-npx sfc generate-observer Account AccountObserver
-```
-
-**[📖 Full Observer documentation](https://berat-dzhevdetov.github.io/salesforce-connector/#observers-lifecycle-hooks)**
-
-### 🔗 Relationships
-
-Eager and lazy loading for Salesforce relationships:
-
-```typescript
-// Eager loading with relationship fields
-const contacts = await Contact
-  .select('Id', 'Name', 'Owner.Name', 'Owner.Email')
-  .get();
-
-// Lazy loading on demand
-const contact = await Contact.find('003xxx');
-await contact.loadOwner();
-console.log(contact.Owner?.Name);
-```
-
-**[📖 Relationship documentation](https://berat-dzhevdetov.github.io/salesforce-connector/#relationships-and-lazy-loading)**
-
-### 📝 CRUD Operations
-
-Simple, consistent interface for all operations:
-
-```typescript
-// Create
-const account = await Account.create({ Name: 'Acme' });
-
-// Read
-const found = await Account.find('001xxx');
-const all = await Account.where('Industry', 'Tech').get();
-
-// Update
-await account.update({ Industry: 'Finance' });
-
-// Delete
-await account.delete();
-```
-
-**[📖 CRUD documentation](https://berat-dzhevdetov.github.io/salesforce-connector/#crud-operations)**
-
 ## Documentation
 
 📚 **[View Full Documentation](https://berat-dzhevdetov.github.io/salesforce-connector/)**
 
-- [Installation & Setup](https://berat-dzhevdetov.github.io/salesforce-connector/#installation)
-- [Configuration](https://berat-dzhevdetov.github.io/salesforce-connector/#configuration)
-- [Authentication](https://berat-dzhevdetov.github.io/salesforce-connector/#authentication-strategy)
-- [Model Generation (CLI)](https://berat-dzhevdetov.github.io/salesforce-connector/#model-generation-cli)
-- [Query Operations](https://berat-dzhevdetov.github.io/salesforce-connector/#query-operations)
-- [CRUD Operations](https://berat-dzhevdetov.github.io/salesforce-connector/#crud-operations)
-- [Observers (Lifecycle Hooks)](https://berat-dzhevdetov.github.io/salesforce-connector/#observers-lifecycle-hooks)
-- [Relationships](https://berat-dzhevdetov.github.io/salesforce-connector/#relationships-and-lazy-loading)
-- [TypeScript Support](https://berat-dzhevdetov.github.io/salesforce-connector/#typescript-support)
-- [Examples](https://berat-dzhevdetov.github.io/salesforce-connector/#examples)
+### Getting Started
+- [Installation & Configuration](https://berat-dzhevdetov.github.io/salesforce-connector/getting-started/installation)
+- [Quick Start Guide](https://berat-dzhevdetov.github.io/salesforce-connector/getting-started/quick-start)
 
-## CLI Commands
+### Models
+- [Defining Models](https://berat-dzhevdetov.github.io/salesforce-connector/models/defining-models)
+- [Model Generation (CLI)](https://berat-dzhevdetov.github.io/salesforce-connector/models/model-generation)
 
-```bash
-# Initialize configuration
-npx sfc init
+### Querying
+- [Lambda Queries (Recommended)](https://berat-dzhevdetov.github.io/salesforce-connector/querying/lambda-queries)
+- [Basic Queries](https://berat-dzhevdetov.github.io/salesforce-connector/querying/basic-queries)
+- [Advanced Queries](https://berat-dzhevdetov.github.io/salesforce-connector/querying/advanced-queries)
+- [Relationships & Subqueries](https://berat-dzhevdetov.github.io/salesforce-connector/querying/relationships)
 
-# Test authentication
-npx sfc test-auth
+### CRUD Operations
+- [Creating Records](https://berat-dzhevdetov.github.io/salesforce-connector/crud/creating)
+- [Reading Records](https://berat-dzhevdetov.github.io/salesforce-connector/crud/reading)
+- [Updating Records](https://berat-dzhevdetov.github.io/salesforce-connector/crud/updating)
+- [Deleting Records](https://berat-dzhevdetov.github.io/salesforce-connector/crud/deleting)
 
-# Generate models
-npx sfc scaffold Account Contact Opportunity
+### Advanced
+- [Lifecycle Hooks (Observers)](https://berat-dzhevdetov.github.io/salesforce-connector/advanced/observers)
+- [Closure Variables Deep Dive](https://berat-dzhevdetov.github.io/salesforce-connector/advanced/closure-variables)
+- [Error Handling](https://berat-dzhevdetov.github.io/salesforce-connector/advanced/error-handling)
 
-# Generate observer
-npx sfc generate-observer Account AccountObserver
-```
+### CLI
+- [CLI Commands Reference](https://berat-dzhevdetov.github.io/salesforce-connector/cli/commands)
+- [Authentication Setup](https://berat-dzhevdetov.github.io/salesforce-connector/cli/authentication)
 
 ## Important Notes
 
 ⚠️ **Governor Limits:** This library does NOT automatically handle Salesforce governor limits. Always use `.limit()` and proper filtering.
 
 ⚠️ **Observers vs Salesforce Triggers:** Observers are JavaScript/TypeScript hooks that run in your application. They are NOT Salesforce Triggers, Process Builder, or Flows.
-
-## Examples
-
-Quick example showing multiple features:
-
-```typescript
-import { Account } from './models';
-
-// Query with relationships and filtering
-const accounts = await Account
-  .select('Id', 'Name', 'Industry', 'Owner.Name')
-  .where('AnnualRevenue', '>', 1000000)
-  .whereIn('Industry', ['Technology', 'Finance'])
-  .orderBy('CreatedDate', 'DESC')
-  .limit(10)
-  .get();
-
-for (const account of accounts) {
-  console.log(`${account.Name} - ${account.Owner?.Name}`);
-}
-```
-
-**[📖 See more examples](https://berat-dzhevdetov.github.io/salesforce-connector/#examples)**
 
 ## Contributing
 
