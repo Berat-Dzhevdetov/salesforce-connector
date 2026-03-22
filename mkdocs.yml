@@ -61,6 +61,37 @@ plugins:
 
 nav:
   - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Configuration: getting-started/configuration.md
+      - Quick Start: getting-started/quick-start.md
+  - Models:
+      - Defining Models: models/defining-models.md
+      - Model Generation (CLI): models/model-generation.md
+      - Field Types: models/field-types.md
+  - Querying:
+      - Lambda Queries (Recommended): querying/lambda-queries.md
+      - Basic Queries: querying/basic-queries.md
+      - Advanced Queries: querying/advanced-queries.md
+      - Pagination: querying/pagination.md
+      - Relationships & Subqueries: querying/relationships.md
+  - CRUD Operations:
+      - Creating Records: crud/creating.md
+      - Reading Records: crud/reading.md
+      - Updating Records: crud/updating.md
+      - Deleting Records: crud/deleting.md
+  - Advanced Topics:
+      - Lifecycle Hooks (Observers): advanced/observers.md
+      - Closure Variables Deep Dive: advanced/closure-variables.md
+      - Error Handling: advanced/error-handling.md
+      - Salesforce Governor Limits: advanced/governor-limits.md
+  - CLI Tools:
+      - CLI Commands Reference: cli/commands.md
+      - Authentication Setup: cli/authentication.md
+      - Scaffolding Guide: cli/scaffolding.md
+  - Reference:
+      - Migration Guide: migration-guide.md
+      - Lambda Model (Legacy): lambda-model.md
 
 extra:
   social:
