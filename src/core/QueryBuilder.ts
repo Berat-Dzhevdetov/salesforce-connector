@@ -377,7 +377,12 @@ export class QueryBuilder<T = any> {
 
       // If a model constructor is provided, instantiate models
       if (this.modelConstructor) {
-        return response.data.records.map((record: any) => new this.modelConstructor!(record));
+        const instances = response.data.records.map((record: any) => new this.modelConstructor!(record));
+
+        // Execute afterQuery observers
+        await (this.modelConstructor as any).executeObservers('afterQuery', instances);
+
+        return instances;
       }
 
       // Otherwise return raw data

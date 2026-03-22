@@ -126,8 +126,16 @@ export class TypedQueryBuilder<TModel, TResult> {
         return [];
       }
 
+      const records = response.data.records;
+
+      // Execute afterQuery observers if model constructor is available
+      if (this.modelConstructor) {
+        const instances = records.map((record: any) => new this.modelConstructor!(record));
+        await (this.modelConstructor as any).executeObservers('afterQuery', instances);
+      }
+
       // Map Salesforce records to the result type
-      return response.data.records.map((record: any) => this.mapRecord(record));
+      return records.map((record: any) => this.mapRecord(record));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Query execution failed: ${errorMessage}`);

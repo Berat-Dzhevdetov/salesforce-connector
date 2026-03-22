@@ -314,7 +314,12 @@ export class Model<T extends ModelData = ModelData> {
         return null;
       }
 
-      return new this(response.data);
+      const instance = new this(response.data);
+
+      // Execute afterFind observers
+      await ModelClass.executeObservers('afterFind', instance);
+
+      return instance;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to find record: ${errorMessage}`);
