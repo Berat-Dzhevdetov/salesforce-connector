@@ -13,7 +13,6 @@ export { SalesforceClient } from './core/SalesforceClient';
 export { LambdaModel } from './core/LambdaModel';
 export { TypedQueryBuilder } from './core/TypedQueryBuilder';
 export { LambdaParser } from './core/LambdaParser';
-export { SubqueryBuilder } from './core/SubqueryBuilder';
 export type { RelationshipArray, SubqueryResult } from './core/RelationshipArray';
 export { relationshipArray } from './core/RelationshipArray';
 

@@ -1,20 +1,49 @@
 [![Publish to NPM](https://github.com/Berat-Dzhevdetov/salesforce-connector/actions/workflows/publish.yml/badge.svg)](https://github.com/Berat-Dzhevdetov/salesforce-connector/actions/workflows/publish.yml)
+[![Test](https://github.com/Berat-Dzhevdetov/salesforce-connector/actions/workflows/test.yml/badge.svg)](https://github.com/Berat-Dzhevdetov/salesforce-connector/actions/workflows/test.yml)
 
 # Salesforce ORM
 
-A TypeScript ORM library for Salesforce with an ActiveRecord-style interface. Build type-safe Salesforce integrations with a fluent query builder, automatic model generation, and lifecycle hooks.
+A TypeScript ORM library for Salesforce with **lambda-based queries**, full type inference, and closure variable support. Build type-safe Salesforce integrations with automatic model generation and lifecycle hooks.
 
-📚 **[Full Documentation](https://berat-dzhevdetov.github.io/salesforce-connector/)** | 🚀 **[Quick Start](#quick-start)** | 💬 **[Examples](https://berat-dzhevdetov.github.io/salesforce-connector/#examples)**
+📚 **[Full Documentation](https://berat-dzhevdetov.github.io/salesforce-connector/)** | 🆕 **[LambdaModel Guide](https://berat-dzhevdetov.github.io/salesforce-connector/lambda-model)** | 🔄 **[Migration Guide](https://berat-dzhevdetov.github.io/salesforce-connector/migration-guide)**
+
+## ✨ What's New: LambdaModel
+
+**Type-safe queries with closure variable support!**
+
+```typescript
+// Define your model with full type safety
+class Account extends LambdaModel<AccountData> {
+  protected static objectName = 'Account';
+}
+
+// Query with IntelliSense and closure variables
+const industry = 'Technology';
+const minRevenue = 1000000;
+
+const accounts = await Account
+  .select(x => ({
+    Id: x.Id,           // ✓ IntelliSense works!
+    Name: x.Name,       // ✓ Typos caught at compile time
+    Industry: x.Industry
+  }))
+  .where(x => x.Industry === industry && x.AnnualRevenue > minRevenue)  // ✓ Closures work!
+  .orderBy(x => x.AnnualRevenue, 'DESC')
+  .limit(10)
+  .get();
+```
+
+**[👉 See LambdaModel Guide](https://berat-dzhevdetov.github.io/salesforce-connector/lambda-model)**
 
 ## Features
 
-- ✅ **ActiveRecord-style ORM** - Intuitive API similar to Rails, Laravel, or TypeORM
+- 🎯 **Lambda-Based Queries** - Full IntelliSense with closure variable support (NEW!)
+- 📊 **100% Type-Safe** - Catch errors at compile time, not runtime
 - 🔧 **Automatic Model Generation** - CLI scaffolds TypeScript models from Salesforce metadata
-- 🔍 **Fluent Query Builder** - Type-safe queries with WHERE, JOIN, ORDER BY, LIMIT support
+- 🔍 **Fluent Query Builder** - Chainable API with WHERE, JOIN, ORDER BY, LIMIT
 - 📄 **Smart Pagination** - Built-in pagination with metadata (totalSize, hasNextPage)
-- 🪝 **Lifecycle Hooks (Observers)** - beforeCreate, afterUpdate, beforeDelete, and more
-- 🔗 **Relationship Support** - Eager and lazy loading for lookups and child relationships
-- 📊 **TypeScript First** - Full type safety with auto-generated interfaces
+- 🔗 **Relationship Support** - Query subqueries with full closure support
+- 🪝 **Lifecycle Hooks** - beforeCreate, afterUpdate, beforeDelete, and more
 - ⚡ **Zero Dependencies** - Lightweight with minimal external dependencies
 
 ## Quick Start
@@ -38,10 +67,10 @@ npx sfc test-auth
 npx sfc scaffold Account Contact Opportunity
 ```
 
-### Basic Usage
+### Basic Usage (LambdaModel - Recommended)
 
 ```typescript
-import { SalesforceConfig, Model } from 'javascript-salesforce-connector';
+import { SalesforceConfig, LambdaModel } from 'javascript-salesforce-connector';
 import { Account } from './models/Account';
 
 // Configure connection
@@ -51,22 +80,23 @@ SalesforceConfig.initialize({
 });
 SalesforceConfig.setAccessToken('your-access-token');
 
-// Query records
+// Query with closure variables and type safety
+const industry = 'Technology';
 const accounts = await Account
-  .select('Id', 'Name', 'Industry')
-  .where('Industry', 'Technology')
+  .select(x => ({
+    Id: x.Id,
+    Name: x.Name,
+    Industry: x.Industry
+  }))
+  .where(x => x.Industry === industry)  // Closure variable works!
   .limit(10)
   .get();
 
-// Paginated query with metadata
-const result = await Account
-  .select('Id', 'Name', 'Industry')
-  .where('Industry', 'Technology')
+// Paginated query
+const { records, totalSize, hasNextPage } = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name }))
+  .where(x => x.Industry === industry)
   .paginate(1, 20); // page 1, 20 items per page
-
-console.log(result.records);      // Account[]
-console.log(result.totalSize);    // Total matching records
-console.log(result.hasNextPage);  // true/false
 
 // Create a record
 const account = await Account.create({
@@ -81,6 +111,24 @@ await account.save();
 // Delete a record
 await account.delete();
 ```
+
+### Legacy Usage (Deprecated)
+
+> ⚠️ **Deprecation Notice**: String-based queries are deprecated. Please migrate to LambdaModel. [See Migration Guide](https://berat-dzhevdetov.github.io/salesforce-connector/migration-guide).
+
+<details>
+<summary>Click to see legacy syntax</summary>
+
+```typescript
+// Old way (will be removed in v2.0)
+const accounts = await Account
+  .select('Id', 'Name', 'Industry')
+  .where('Industry', 'Technology')
+  .limit(10)
+  .get();
+```
+
+</details>
 
 ## Core Features
 

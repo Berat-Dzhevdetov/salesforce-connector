@@ -58,6 +58,17 @@ export class LambdaModel<T extends ModelData = ModelData> extends Model<T> {
    */
   static select<T extends LambdaModel, TResult>(
     this: new (data?: any) => T,
+    selector: (x: T) => TResult
+  ): TypedQueryBuilder<T, TResult>;
+
+  static select<T extends LambdaModel>(
+    this: new (data?: any) => T,
+    selector: string,
+    ...fields: string[]
+  ): any;
+
+  static select<T extends LambdaModel, TResult>(
+    this: new (data?: any) => T,
     selector: ((x: T) => TResult) | string,
     ...fields: string[]
   ): TypedQueryBuilder<T, TResult> | any {
@@ -112,141 +123,6 @@ export class LambdaModel<T extends ModelData = ModelData> extends Model<T> {
     this: new (data?: any) => T
   ): Promise<T[]> {
     return super.all.call(this) as Promise<T[]>;
-  }
-
-  /**
-   * Updates multiple records matching a condition
-   *
-   * @param selector - Lambda that identifies which field to match
-   * @param value - The value to match
-   * @param updates - The fields to update
-   *
-   * @example
-   * ```typescript
-   * await Account.updateWhere(
-   *   x => x.Industry,
-   *   'Technology',
-   *   { Rating: 'Hot' }
-   * );
-   * ```
-   */
-  static async updateWhere<T extends LambdaModel, K extends keyof T>(
-    this: new (data?: any) => T,
-    selector: (x: T) => T[K],
-    value: T[K],
-    updates: Partial<ModelData>
-  ): Promise<number> {
-    const ModelClass = this as any;
-    const objectName = ModelClass.getObjectName();
-
-    // Parse the field selector
-    const parsedMap = LambdaModel.parser.parseSelector(selector as any);
-    const fieldName = Object.values(parsedMap)[0];
-
-    // Format the value for SOQL
-    let soqlValue: string;
-    if (typeof value === 'string') {
-      soqlValue = `'${value}'`;
-    } else if (typeof value === 'number') {
-      soqlValue = String(value);
-    } else if (typeof value === 'boolean') {
-      soqlValue = value ? 'TRUE' : 'FALSE';
-    } else {
-      soqlValue = String(value);
-    }
-
-    // Find all matching records
-    const soql = `SELECT Id FROM ${objectName} WHERE ${fieldName} = ${soqlValue}`;
-    const baseUrl = SalesforceConfig.getApiBaseUrl();
-    const encodedQuery = encodeURIComponent(soql);
-    const url = `${baseUrl}/query?q=${encodedQuery}`;
-
-    const response = await SalesforceClient.get<any>(url);
-    const records = response?.data?.records || [];
-
-    if (records.length === 0) {
-      return 0;
-    }
-
-    // Update each record
-    let updateCount = 0;
-    for (const record of records) {
-      try {
-        const instance = new this({ Id: record.Id });
-        await instance.update(updates);
-        updateCount++;
-      } catch (error) {
-        console.error(`Failed to update record ${record.Id}:`, error);
-      }
-    }
-
-    return updateCount;
-  }
-
-  /**
-   * Deletes multiple records matching a condition
-   *
-   * @param selector - Lambda that identifies which field to match
-   * @param value - The value to match
-   *
-   * @example
-   * ```typescript
-   * await Account.deleteWhere(
-   *   x => x.Industry,
-   *   'Obsolete'
-   * );
-   * ```
-   */
-  static async deleteWhere<T extends LambdaModel, K extends keyof T>(
-    this: new (data?: any) => T,
-    selector: (x: T) => T[K],
-    value: T[K]
-  ): Promise<number> {
-    const ModelClass = this as any;
-    const objectName = ModelClass.getObjectName();
-
-    // Parse the field selector
-    const parsedMap = LambdaModel.parser.parseSelector(selector as any);
-    const fieldName = Object.values(parsedMap)[0];
-
-    // Format the value for SOQL
-    let soqlValue: string;
-    if (typeof value === 'string') {
-      soqlValue = `'${value}'`;
-    } else if (typeof value === 'number') {
-      soqlValue = String(value);
-    } else if (typeof value === 'boolean') {
-      soqlValue = value ? 'TRUE' : 'FALSE';
-    } else {
-      soqlValue = String(value);
-    }
-
-    // Find all matching records
-    const soql = `SELECT Id FROM ${objectName} WHERE ${fieldName} = ${soqlValue}`;
-    const baseUrl = SalesforceConfig.getApiBaseUrl();
-    const encodedQuery = encodeURIComponent(soql);
-    const url = `${baseUrl}/query?q=${encodedQuery}`;
-
-    const response = await SalesforceClient.get<any>(url);
-    const records = response?.data?.records || [];
-
-    if (records.length === 0) {
-      return 0;
-    }
-
-    // Delete each record
-    let deleteCount = 0;
-    for (const record of records) {
-      try {
-        const instance = new this({ Id: record.Id });
-        await instance.delete();
-        deleteCount++;
-      } catch (error) {
-        console.error(`Failed to delete record ${record.Id}:`, error);
-      }
-    }
-
-    return deleteCount;
   }
 
   /**

@@ -38,50 +38,15 @@ export class TypedQueryBuilder<TModel, TResult> {
    * Adds a WHERE condition to the query
    * Multiple where calls are combined with AND
    *
-   * Note: This only works with literal values. For dynamic values, use .whereEquals()
+   * Supports:
+   * - Literal values: .where(x => x.Industry === 'Technology')
+   * - Closure variables: .where(x => x.Industry === industry)
+   * - String methods: .where(x => x.Name.includes(searchTerm))
+   * - Multiple conditions: .where(x => x.A === 'a' && x.B > 10)
+   * - OR conditions: .where(x => x.A === 'a' || x.B === 'b')
    */
   where(condition: (x: TModel) => boolean): this {
     const newCondition = this.parser.parseWhere(condition);
-
-    if (this.whereClause) {
-      this.whereClause = `${this.whereClause} AND ${newCondition}`;
-    } else {
-      this.whereClause = newCondition;
-    }
-
-    return this;
-  }
-
-  /**
-   * Adds a WHERE equals condition with a dynamic value
-   * Use this when you need to filter by runtime variables
-   *
-   * @example
-   * const targetId = '001xxx';
-   * Account.select(x => ({ Name: x.Name }))
-   *   .whereEquals(x => x.Id, targetId)
-   */
-  whereEquals<K extends keyof TModel>(
-    fieldSelector: (x: TModel) => TModel[K],
-    value: TModel[K]
-  ): this {
-    const parsedMap = this.parser.parseSelector(fieldSelector as any);
-    const fieldName = Object.values(parsedMap)[0];
-
-    let soqlValue: string;
-    if (typeof value === 'string') {
-      soqlValue = `'${value}'`;
-    } else if (typeof value === 'number') {
-      soqlValue = String(value);
-    } else if (typeof value === 'boolean') {
-      soqlValue = value ? 'TRUE' : 'FALSE';
-    } else if (value === null || value === undefined) {
-      soqlValue = 'NULL';
-    } else {
-      soqlValue = String(value);
-    }
-
-    const newCondition = `${fieldName} = ${soqlValue}`;
 
     if (this.whereClause) {
       this.whereClause = `${this.whereClause} AND ${newCondition}`;

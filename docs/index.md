@@ -31,21 +31,59 @@ const techAccounts = await Account
 
 **Remember:** Always filter, limit, and paginate your queries. The library provides the tools, but you must use them responsibly.
 
+## 🆕 What's New: LambdaModel
+
+**Type-safe queries with closure variable support!**
+
+We've introduced a new lambda-based query API that provides:
+- ✅ Full TypeScript type inference
+- ✅ IntelliSense for field names
+- ✅ Closure variable support in WHERE clauses
+- ✅ Compile-time error checking
+
+```typescript
+const industry = 'Technology';
+const minRevenue = 1000000;
+
+const accounts = await Account
+  .select(x => ({
+    Id: x.Id,
+    Name: x.Name,
+    Industry: x.Industry
+  }))
+  .where(x => x.Industry === industry && x.AnnualRevenue > minRevenue)
+  .orderBy(x => x.AnnualRevenue, 'DESC')
+  .get();
+```
+
+**📚 [Read the LambdaModel Guide](lambda-model.md)** | **🔄 [Migration Guide](migration-guide.md)**
+
+---
+
 ## Table of Contents
 
+### Getting Started
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Authentication Strategy](#authentication-strategy)
 - [Model Generation (CLI)](#model-generation-cli)
+
+### Query APIs
+- **[LambdaModel (Recommended)](lambda-model.md)** - Type-safe lambda queries
+- [Query Operations (Legacy)](#query-operations) - String-based queries (deprecated)
+
+### Core Features
 - [Creating Models](#creating-models)
-- [Query Operations](#query-operations)
 - [CRUD Operations](#crud-operations)
 - [Observers (Lifecycle Hooks)](#observers-lifecycle-hooks)
 - [Relationships and Lazy Loading](#relationships-and-lazy-loading)
+
+### Reference
 - [Base Model Methods](#base-model-methods)
 - [Error Handling](#error-handling)
 - [TypeScript Support](#typescript-support)
 - [Examples](#examples)
+- **[Migration Guide](migration-guide.md)** - Migrate from string-based to lambda queries
 
 ## Installation
 

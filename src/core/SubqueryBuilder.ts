@@ -3,6 +3,9 @@ import { LambdaParser } from './LambdaParser';
 /**
  * SubqueryBuilder provides chainable methods for building SOQL subqueries
  * Used when querying relationships with lambda syntax
+ *
+ * Note: Subqueries are parsed during SELECT parsing via LambdaParser.buildSubqueryFromChain(),
+ * so WHERE clauses are handled by LambdaParser.parseWhereFromNode() which supports closure variables.
  */
 export class SubqueryBuilder<TModel, TResult> {
   private parser: LambdaParser;
@@ -22,6 +25,11 @@ export class SubqueryBuilder<TModel, TResult> {
   /**
    * Adds a WHERE condition to the subquery
    * Multiple where calls are combined with AND
+   *
+   * Supports closure variables via Inspector Protocol:
+   * - Simple variables: .where(c => c.Status === status)
+   * - Object properties: .where(c => c.Priority === config.priority)
+   * - Nested properties: .where(c => c.Type === settings.filters.type)
    */
   where(condition: (x: TModel) => boolean): this {
     const newCondition = this.parser.parseWhere(condition);
