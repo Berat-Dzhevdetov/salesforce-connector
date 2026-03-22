@@ -3,7 +3,37 @@ import { SalesforceConfig } from './SalesforceConfig';
 import { SalesforceQueryResponse, QueryOperator, PaginatedResponse } from '../types';
 
 /**
- * Query builder for constructing and executing SOQL queries
+ * @deprecated QueryBuilder is deprecated and will be removed in v2.0.0
+ *
+ * Please migrate to LambdaModel for a better developer experience with:
+ * - Full TypeScript type inference
+ * - Closure variable support in WHERE clauses
+ * - Type-safe field selection
+ * - IntelliSense support
+ *
+ * @example Migration example:
+ * ```typescript
+ * // Old (deprecated):
+ * const accounts = await Account
+ *   .select('Id', 'Name', 'Industry')
+ *   .where('Industry', 'Technology')
+ *   .where('AnnualRevenue', '>', 1000000)
+ *   .get();
+ *
+ * // New (recommended):
+ * const industry = 'Technology';
+ * const minRevenue = 1000000;
+ * const accounts = await Account
+ *   .select(x => ({
+ *     Id: x.Id,
+ *     Name: x.Name,
+ *     Industry: x.Industry
+ *   }))
+ *   .where(x => x.Industry === industry && x.AnnualRevenue > minRevenue)
+ *   .get();
+ * ```
+ *
+ * See documentation: https://berat-dzhevdetov.github.io/salesforce-connector/
  */
 type WhereClause = {
   condition: string;
@@ -347,7 +377,12 @@ export class QueryBuilder<T = any> {
 
       // If a model constructor is provided, instantiate models
       if (this.modelConstructor) {
-        return response.data.records.map((record: any) => new this.modelConstructor!(record));
+        const instances = response.data.records.map((record: any) => new this.modelConstructor!(record));
+
+        // Execute afterQuery observers
+        await (this.modelConstructor as any).executeObservers('afterQuery', instances);
+
+        return instances;
       }
 
       // Otherwise return raw data

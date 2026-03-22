@@ -9,6 +9,13 @@ export { QueryBuilder } from './core/QueryBuilder';
 export { SalesforceConfig } from './core/SalesforceConfig';
 export { SalesforceClient } from './core/SalesforceClient';
 
+// Lambda-based query exports
+export { LambdaModel } from './core/LambdaModel';
+export { TypedQueryBuilder } from './core/TypedQueryBuilder';
+export { LambdaParser } from './core/LambdaParser';
+export type { RelationshipArray, SubqueryResult } from './core/RelationshipArray';
+export { relationshipArray } from './core/RelationshipArray';
+
 // Observer exports
 export type { Observer, ObserverOptions } from './core/Observer';
 

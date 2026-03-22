@@ -80,6 +80,7 @@ program
   .option('--no-comments', 'Skip field comments')
   .option('--force', 'Force regenerate models (ignore existing files and custom code)')
   .option('--no-backup', 'Skip creating backup files when updating existing models')
+  .option('--legacy', 'Generate legacy Model classes instead of LambdaModel (deprecated)')
   .action(async (objects: string[], options) => {
     try {
       console.log('Salesforce Model Generator\n');
@@ -108,10 +109,16 @@ program
         console.log(`Created directory: ${outputDir}\n`);
       }
 
-      console.log(`Generating ${objects.length} model(s)...\n`);
+      console.log(`Generating ${objects.length} model(s)...`);
+      if (options.legacy) {
+        console.log('⚠️  Using legacy Model class (deprecated). Consider using LambdaModel for better type safety.\n');
+      } else {
+        console.log('✓ Using LambdaModel with type-safe lambda queries\n');
+      }
 
       const generatorOptions: ModelGeneratorOptions = {
         includeComments: options.comments !== false,
+        useLegacyModel: options.legacy === true,
       };
 
       let successCount = 0;
