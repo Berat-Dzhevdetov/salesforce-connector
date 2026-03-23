@@ -93,6 +93,95 @@ const accounts = await Account
 // Generates: WHERE Name LIKE '%Corp'
 ```
 
+## WHERE IN Queries (Array Membership)
+
+The `.includes()` method automatically detects arrays and generates efficient `WHERE IN` clauses:
+
+### Basic Array Queries
+
+```typescript
+// String array
+const industries = ['Technology', 'Finance', 'Healthcare'];
+const accounts = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name }))
+  .where(x => x.Industry.includes(industries))
+  .get();
+// SOQL: WHERE Industry IN ('Technology', 'Finance', 'Healthcare')
+
+// Numeric array
+const revenues = [1000000, 5000000, 10000000];
+const accounts = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name }))
+  .where(x => x.AnnualRevenue.includes(revenues))
+  .get();
+// SOQL: WHERE AnnualRevenue IN (1000000, 5000000, 10000000)
+
+// Boolean array
+const statuses = [true];
+const accounts = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name }))
+  .where(x => x.IsActive.includes(statuses))
+  .get();
+// SOQL: WHERE IsActive IN (TRUE)
+```
+
+### Multiple WHERE IN Clauses
+
+```typescript
+const industries = ['Technology', 'Finance'];
+const ratings = ['Hot', 'Warm'];
+
+const accounts = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name }))
+  .where(x => x.Industry.includes(industries) && x.Rating.includes(ratings))
+  .get();
+// SOQL: WHERE Industry IN ('Technology', 'Finance') AND Rating IN ('Hot', 'Warm')
+```
+
+### Complex Conditions with WHERE IN
+
+```typescript
+const industries = ['Technology', 'Finance', 'Healthcare'];
+const minRevenue = 5000000;
+
+const accounts = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name }))
+  .where(x =>
+    (x.Industry.includes(industries) && x.AnnualRevenue > minRevenue) ||
+    (x.Rating === 'Hot' && x.IsActive === true)
+  )
+  .get();
+// SOQL: WHERE (Industry IN ('Technology', 'Finance', 'Healthcare') AND AnnualRevenue > 5000000)
+//    OR (Rating = 'Hot' AND IsActive = TRUE)
+```
+
+### Dynamic IN Queries
+
+```typescript
+function getAccountsByIndustries(allowedIndustries: string[]) {
+  return Account
+    .select(x => ({ Id: x.Id, Name: x.Name, Industry: x.Industry }))
+    .where(x => x.Industry.includes(allowedIndustries))
+    .get();
+}
+
+// Usage
+const techAndFinance = await getAccountsByIndustries(['Technology', 'Finance']);
+const allIndustries = await getAccountsByIndustries(['Tech', 'Finance', 'Healthcare', 'Retail']);
+```
+
+### Nested Properties with WHERE IN
+
+```typescript
+const states = ['CA', 'NY', 'TX'];
+
+const accounts = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name, State: x.BillingAddress.State }))
+  .where(x => x.BillingAddress.State.includes(states))
+  .get();
+// SOQL: WHERE BillingAddress.State IN ('CA', 'NY', 'TX')
+```
+
 ## Dynamic Query Building
 
 Build queries conditionally:
@@ -170,18 +259,16 @@ const activeStatus = true;
 const industries = ['Technology', 'Finance', 'Healthcare'];
 const minRevenue = 500000;
 
-// Note: Currently IN operator requires extending the parser
-// For now, use OR conditions:
+// Use WHERE IN with array includes()
 const accounts = await Account
   .select(x => ({ Id: x.Id, Name: x.Name }))
   .where(x =>
     x.IsActive === activeStatus &&
-    (x.Industry === industries[0] ||
-     x.Industry === industries[1] ||
-     x.Industry === industries[2]) &&
+    x.Industry.includes(industries) &&
     x.AnnualRevenue > minRevenue
   )
   .get();
+// SOQL: WHERE IsActive = TRUE AND Industry IN ('Technology', 'Finance', 'Healthcare') AND AnnualRevenue > 500000
 ```
 
 ## Field Comparison

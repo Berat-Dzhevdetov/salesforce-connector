@@ -1,4 +1,5 @@
 import { LambdaParser } from './LambdaParser';
+import { SOQLProxy } from '../types';
 
 /**
  * SubqueryBuilder provides chainable methods for building SOQL subqueries
@@ -30,8 +31,9 @@ export class SubqueryBuilder<TModel, TResult> {
    * - Simple variables: .where(c => c.Status === status)
    * - Object properties: .where(c => c.Priority === config.priority)
    * - Nested properties: .where(c => c.Type === settings.filters.type)
+   * - Array membership: .where(c => c.Status.includes(['Open', 'Pending']))
    */
-  where(condition: (x: TModel) => boolean): this {
+  where(condition: (x: SOQLProxy<TModel>) => boolean): this {
     const newCondition = this.parser.parseWhere(condition);
 
     if (this.whereClause) {

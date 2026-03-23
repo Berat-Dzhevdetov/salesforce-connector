@@ -217,6 +217,126 @@ describe('TypedQueryBuilder.where()', () => {
     });
   });
 
+  describe('Array includes() - WHERE IN support', () => {
+    it('should handle array includes() with string array', () => {
+      const industries = ['Technology', 'Finance', 'Healthcare'];
+      const query = Account
+        .select(x => ({ Id: x.Id, Name: x.Name }))
+        .where(x => x.Industry.includes(industries));
+
+      const soql = query.toSOQL();
+      expect(soql).toBe("SELECT Id, Name FROM Account WHERE Industry IN ('Technology', 'Finance', 'Healthcare')");
+    });
+
+    it('should handle array includes() with single element', () => {
+      const industries = ['Technology'];
+      const query = Account
+        .select(x => ({ Name: x.Name }))
+        .where(x => x.Industry.includes(industries));
+
+      const soql = query.toSOQL();
+      expect(soql).toBe("SELECT Name FROM Account WHERE Industry IN ('Technology')");
+    });
+
+    it('should handle array includes() with numeric array', () => {
+      const revenues = [1000000, 5000000, 10000000];
+      const query = Account
+        .select(x => ({ Name: x.Name, AnnualRevenue: x.AnnualRevenue }))
+        .where(x => x.AnnualRevenue.includes(revenues));
+
+      const soql = query.toSOQL();
+      expect(soql).toBe("SELECT Name, AnnualRevenue FROM Account WHERE AnnualRevenue IN (1000000, 5000000, 10000000)");
+    });
+
+    it('should handle array includes() with boolean array', () => {
+      const statuses = [true, false];
+      const query = Account
+        .select(x => ({ Name: x.Name }))
+        .where(x => x.Active__c.includes(statuses));
+
+      const soql = query.toSOQL();
+      expect(soql).toBe("SELECT Name FROM Account WHERE Active__c IN (TRUE, FALSE)");
+    });
+
+    it('should handle array includes() combined with other conditions using AND', () => {
+      const industries = ['Technology', 'Finance'];
+      const query = Account
+        .select(x => ({ Name: x.Name }))
+        .where(x => x.Industry.includes(industries) && x.AnnualRevenue > 1000000);
+
+      const soql = query.toSOQL();
+      expect(soql).toBe("SELECT Name FROM Account WHERE Industry IN ('Technology', 'Finance') AND AnnualRevenue > 1000000");
+    });
+
+    it('should handle array includes() combined with other conditions using OR', () => {
+      const industries = ['Technology', 'Finance'];
+      const query = Account
+        .select(x => ({ Name: x.Name }))
+        .where(x => x.Industry.includes(industries) || x.AnnualRevenue > 5000000);
+
+      const soql = query.toSOQL();
+      expect(soql).toBe("SELECT Name FROM Account WHERE Industry IN ('Technology', 'Finance') OR AnnualRevenue > 5000000");
+    });
+
+    it('should handle array includes() with strings containing special characters', () => {
+      const names = ["O'Reilly", "AT&T", "Ben & Jerry's"];
+      const query = Account
+        .select(x => ({ Name: x.Name }))
+        .where(x => x.Name.includes(names));
+
+      const soql = query.toSOQL();
+      expect(soql).toBe("SELECT Name FROM Account WHERE Name IN ('O\\'Reilly', 'AT&T', 'Ben & Jerry\\'s')");
+    });
+
+    it('should handle array includes() with closure variable from object property', () => {
+      const filters = {
+        allowedIndustries: ['Technology', 'Finance', 'Healthcare']
+      };
+      const query = Account
+        .select(x => ({ Name: x.Name }))
+        .where(x => x.Industry.includes(filters.allowedIndustries));
+
+      const soql = query.toSOQL();
+      expect(soql).toBe("SELECT Name FROM Account WHERE Industry IN ('Technology', 'Finance', 'Healthcare')");
+    });
+
+    it('should handle array includes() with nested object property closure', () => {
+      const config = {
+        search: {
+          criteria: {
+            industries: ['Technology', 'Finance']
+          }
+        }
+      };
+      const query = Account
+        .select(x => ({ Name: x.Name }))
+        .where(x => x.Industry.includes(config.search.criteria.industries));
+
+      const soql = query.toSOQL();
+      expect(soql).toBe("SELECT Name FROM Account WHERE Industry IN ('Technology', 'Finance')");
+    });
+
+    it('should handle empty array in includes()', () => {
+      const industries: string[] = [];
+      const query = Account
+        .select(x => ({ Name: x.Name }))
+        .where(x => x.Industry.includes(industries));
+
+      const soql = query.toSOQL();
+      expect(soql).toBe("SELECT Name FROM Account WHERE Industry IN ()");
+    });
+
+    it('should handle mixed type arrays by converting to strings', () => {
+      const mixedValues = ['Technology', 123, true, null];
+      const query = Account
+        .select(x => ({ Name: x.Name }))
+        .where(x => x.Industry.includes(mixedValues));
+
+      const soql = query.toSOQL();
+      expect(soql).toBe("SELECT Name FROM Account WHERE Industry IN ('Technology', 123, TRUE, NULL)");
+    });
+  });
+
   describe('Special characters in strings', () => {
     it('should escape single quotes in string values', () => {
       const query = Account

@@ -1,7 +1,7 @@
 import { Project, SyntaxKind, Node, PropertyAccessExpression } from 'ts-morph';
 import inspector from 'node:inspector';
 
-type Operator = "=" | "!=" | ">" | "<" | ">=" | "<=" | "LIKE";
+type Operator = "=" | "!=" | ">" | "<" | ">=" | "<=" | "LIKE" | "IN" | "NOT IN";
 
 interface LeafCondition {
   kind: "leaf";
@@ -780,7 +780,7 @@ export class LambdaParser {
                 if (variable?.value) {
                   // If it's a simple variable, extract directly
                   if (varParts.length === 1) {
-                    foundValue = this.extractValueFromInspector(variable.value);
+                    foundValue = this.extractValueFromInspector(variable.value, session);
                   } else {
                     // If it's an object path, resolve the nested property
                     foundValue = this.resolveNestedProperty(session, variable.value, varParts.slice(1));
@@ -814,12 +814,12 @@ export class LambdaParser {
   /**
    * Extracts the actual JavaScript value from the Inspector protocol value object
    */
-  private extractValueFromInspector(inspectorValue: any): unknown {
+  private extractValueFromInspector(inspectorValue: any, session?: inspector.Session): unknown {
     if (!inspectorValue) {
       return undefined;
     }
 
-    const { type, value, description } = inspectorValue;
+    const { type, value, description, objectId, subtype } = inspectorValue;
 
     switch (type) {
       case 'string':
@@ -834,8 +834,13 @@ export class LambdaParser {
         if (description === 'null') {
           return null;
         }
-        // For objects/arrays, we'd need to recursively fetch properties
-        // For now, return the description as a fallback
+
+        // Handle arrays by fetching their elements
+        if (subtype === 'array' && objectId && session) {
+          return this.extractArrayFromInspector(session, objectId);
+        }
+
+        // For other objects/arrays without session, return the description as a fallback
         return value ?? description;
 
       default:
@@ -844,11 +849,39 @@ export class LambdaParser {
   }
 
   /**
+   * Extracts array elements from the Inspector protocol
+   */
+  private extractArrayFromInspector(session: inspector.Session, arrayObjectId: string): unknown[] {
+    const result: unknown[] = [];
+
+    session.post('Runtime.getProperties', {
+      objectId: arrayObjectId,
+      ownProperties: true
+    }, (err: Error | null, params: any) => {
+      if (!err && params?.result) {
+        // Filter numeric indices and sort them
+        const elements = params.result
+          .filter((prop: any) => /^\d+$/.test(prop.name))
+          .sort((a: any, b: any) => parseInt(a.name) - parseInt(b.name));
+
+        for (const element of elements) {
+          if (element.value) {
+            // Recursively extract the element value (don't pass session to avoid deep recursion)
+            result.push(this.extractValueFromInspector(element.value));
+          }
+        }
+      }
+    });
+
+    return result;
+  }
+
+  /**
    * Resolves a nested property path on an object using the Inspector protocol.
    */
   private resolveNestedProperty(session: inspector.Session, objectValue: any, propertyPath: string[]): unknown {
     if (!objectValue?.objectId || propertyPath.length === 0) {
-      return this.extractValueFromInspector(objectValue);
+      return this.extractValueFromInspector(objectValue, session);
     }
 
     let currentObjectId = objectValue.objectId;
@@ -876,7 +909,7 @@ export class LambdaParser {
 
       // If this is the last property in the path, extract and return its value
       if (i === propertyPath.length - 1) {
-        return this.extractValueFromInspector(nextValue);
+        return this.extractValueFromInspector(nextValue, session);
       }
 
       // Otherwise, continue traversing if it's an object
@@ -1177,6 +1210,16 @@ export class LambdaParser {
 
               // Handle different string methods
               if (methodName === 'includes') {
+                // Check if value is an array - use IN operator for array membership
+                if (Array.isArray(value)) {
+                  return {
+                    kind: "leaf",
+                    field: fieldName,
+                    operator: "IN",
+                    value: value
+                  };
+                }
+                // Otherwise use LIKE for string pattern matching
                 return {
                   kind: "leaf",
                   field: fieldName,
@@ -1371,7 +1414,7 @@ export class LambdaParser {
    */
   private conditionToSOQL(node: ConditionNode): string {
     if (node.kind === "leaf") {
-      const val = this.formatValueForSOQL(node.value);
+      const val = this.formatValueForSOQL(node.value, node.operator);
       return `${node.field} ${node.operator} ${val}`;
     }
 
@@ -1394,7 +1437,7 @@ export class LambdaParser {
   /**
    * Formats a value for SOQL
    */
-  private formatValueForSOQL(value: unknown): string {
+  private formatValueForSOQL(value: unknown, operator?: Operator): string {
     if (value === null || value === undefined) {
       return 'NULL';
     }
@@ -1421,7 +1464,31 @@ export class LambdaParser {
       return `'${value.replace(/'/g, "\\'")}'`;
     }
 
-    // For objects and arrays, convert to JSON string
+    // Handle arrays for IN operator
+    if (Array.isArray(value)) {
+      const formattedValues = value.map(v => {
+        if (typeof v === 'string') {
+          return `'${v.replace(/'/g, "\\'")}'`;
+        }
+        if (typeof v === 'number') {
+          if (Number.isInteger(v)) {
+            return v.toFixed(0);
+          }
+          return v.toString();
+        }
+        if (typeof v === 'boolean') {
+          return v ? 'TRUE' : 'FALSE';
+        }
+        if (v === null || v === undefined) {
+          return 'NULL';
+        }
+        // For other types, convert to string and escape
+        return `'${String(v).replace(/'/g, "\\'")}'`;
+      });
+      return `(${formattedValues.join(', ')})`;
+    }
+
+    // For objects, convert to JSON string
     return `'${JSON.stringify(value).replace(/'/g, "\\'")}'`;
   }
 }

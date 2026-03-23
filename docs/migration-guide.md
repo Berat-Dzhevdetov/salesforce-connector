@@ -178,7 +178,7 @@ const accounts = await Account
 
 ## Common Migration Patterns
 
-### Pattern 1: whereIn() → OR conditions
+### Pattern 1: whereIn() → includes() with arrays
 
 **Before:**
 ```typescript
@@ -190,27 +190,18 @@ const accounts = await Account
   .get();
 ```
 
-**After:**
+**After (New!):**
 ```typescript
 const industries = ['Technology', 'Finance', 'Healthcare'];
 
 const accounts = await Account
   .select(x => ({ Id: x.Id, Name: x.Name }))
-  .where(x =>
-    x.Industry === industries[0] ||
-    x.Industry === industries[1] ||
-    x.Industry === industries[2]
-  )
+  .where(x => x.Industry.includes(industries))
   .get();
-
-// Or build dynamically:
-let query = Account.select(x => ({ Id: x.Id, Name: x.Name }));
-industries.forEach((industry, index) => {
-  query = index === 0
-    ? query.where(x => x.Industry === industry)
-    : query; // Chain OR logic as needed
-});
+// SOQL: WHERE Industry IN ('Technology', 'Finance', 'Healthcare')
 ```
+
+The `.includes()` method automatically detects arrays and generates efficient `WHERE IN` clauses!
 
 ### Pattern 2: whereGroup() → Parentheses
 
@@ -341,10 +332,14 @@ class Account extends LambdaModel<AccountData> { }  // ✓ Use LambdaModel
 **Solution:** Use the lambda WHERE syntax instead - it's more flexible:
 
 ```typescript
-// Instead of whereIn:
-.where(x => x.Industry === 'Tech' || x.Industry === 'Finance')
+// Instead of whereIn - use includes() with arrays:
+const industries = ['Tech', 'Finance'];
+.where(x => x.Industry.includes(industries))
+// SOQL: WHERE Industry IN ('Tech', 'Finance')
 
-// Instead of whereNotIn:
+// Instead of whereNotIn - negate the includes:
+.where(x => !x.Industry.includes(industries))
+// Or use AND conditions:
 .where(x => x.Industry !== 'Tech' && x.Industry !== 'Finance')
 
 // Instead of whereGroup:

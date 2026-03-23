@@ -2,6 +2,8 @@
  * Salesforce ORM Type Definitions
  */
 
+export * from './lambda-helpers';
+
 export interface SalesforceConfig {
   instanceUrl: string;
   apiVersion: string;
