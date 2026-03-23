@@ -1,6 +1,6 @@
 import { SalesforceClient } from './SalesforceClient';
 import { SalesforceConfig } from './SalesforceConfig';
-import { SalesforceQueryResponse, PaginatedResponse } from '../types';
+import { SalesforceQueryResponse, PaginatedResponse, SOQLProxy } from '../types';
 import { LambdaParser } from './LambdaParser';
 
 /**
@@ -42,10 +42,11 @@ export class TypedQueryBuilder<TModel, TResult> {
    * - Literal values: .where(x => x.Industry === 'Technology')
    * - Closure variables: .where(x => x.Industry === industry)
    * - String methods: .where(x => x.Name.includes(searchTerm))
+   * - Array membership: .where(x => x.Industry.includes(['Technology', 'Finance']))
    * - Multiple conditions: .where(x => x.A === 'a' && x.B > 10)
    * - OR conditions: .where(x => x.A === 'a' || x.B === 'b')
    */
-  where(condition: (x: TModel) => boolean): this {
+  where(condition: (x: SOQLProxy<TModel>) => boolean): this {
     const newCondition = this.parser.parseWhere(condition);
 
     if (this.whereClause) {

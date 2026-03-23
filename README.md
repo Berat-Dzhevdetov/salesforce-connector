@@ -46,6 +46,20 @@ const accounts = await Account
   .get();
 ```
 
+### 📋 WHERE IN Queries
+
+Array membership with automatic `WHERE IN` detection:
+
+```typescript
+const industries = ['Technology', 'Finance', 'Healthcare'];
+
+const accounts = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name }))
+  .where(x => x.Industry.includes(industries))
+  .get();
+// SOQL: WHERE Industry IN ('Technology', 'Finance', 'Healthcare')
+```
+
 ### 🌳 Relationship Queries with Closures
 
 Query subqueries with full closure support:

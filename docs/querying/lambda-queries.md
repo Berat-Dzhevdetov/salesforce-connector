@@ -226,6 +226,67 @@ await Account
   .get();
 ```
 
+### Array Membership (WHERE IN)
+
+The `.includes()` method automatically detects arrays and generates `WHERE IN` clauses:
+
+```typescript
+// String array → WHERE IN
+const industries = ['Technology', 'Finance', 'Healthcare'];
+
+const accounts = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name, Industry: x.Industry }))
+  .where(x => x.Industry.includes(industries))
+  .get();
+// SOQL: WHERE Industry IN ('Technology', 'Finance', 'Healthcare')
+```
+
+**Numeric arrays:**
+```typescript
+const revenues = [1000000, 5000000, 10000000];
+
+const accounts = await Account
+  .select(x => ({ Name: x.Name, AnnualRevenue: x.AnnualRevenue }))
+  .where(x => x.AnnualRevenue.includes(revenues))
+  .get();
+// SOQL: WHERE AnnualRevenue IN (1000000, 5000000, 10000000)
+```
+
+**Boolean arrays:**
+```typescript
+const statuses = [true, false];
+
+const accounts = await Account
+  .select(x => ({ Name: x.Name }))
+  .where(x => x.Active__c.includes(statuses))
+  .get();
+// SOQL: WHERE Active__c IN (TRUE, FALSE)
+```
+
+**With closure variables:**
+```typescript
+const config = {
+  allowedIndustries: ['Technology', 'Finance', 'Healthcare']
+};
+
+const accounts = await Account
+  .select(x => ({ Name: x.Name }))
+  .where(x => x.Industry.includes(config.allowedIndustries))
+  .get();
+// SOQL: WHERE Industry IN ('Technology', 'Finance', 'Healthcare')
+```
+
+**Combined with other conditions:**
+```typescript
+const industries = ['Technology', 'Finance'];
+
+const accounts = await Account
+  .select(x => ({ Name: x.Name }))
+  .where(x => x.Industry.includes(industries) && x.AnnualRevenue > 1000000)
+  .get();
+// SOQL: WHERE Industry IN ('Technology', 'Finance') AND AnnualRevenue > 1000000
+```
+
 ### Operators
 
 ```typescript
@@ -460,13 +521,41 @@ const accounts = await Account
   .get();
 ```
 
+### WHERE IN Migration
+
+**Before (deprecated - verbose OR chains):**
+```typescript
+const industries = ['Technology', 'Finance', 'Healthcare'];
+
+const accounts = await Account
+  .select('Id', 'Name')
+  .where(x =>
+    x.Industry === industries[0] ||
+    x.Industry === industries[1] ||
+    x.Industry === industries[2]
+  )
+  .get();
+```
+
+**After (recommended - clean includes()):**
+```typescript
+const industries = ['Technology', 'Finance', 'Healthcare'];
+
+const accounts = await Account
+  .select(x => ({ Id: x.Id, Name: x.Name }))
+  .where(x => x.Industry.includes(industries))
+  .get();
+// SOQL: WHERE Industry IN ('Technology', 'Finance', 'Healthcare')
+```
+
 ### Benefits of Migration
 
 1. **Type Safety**: Catch typos at compile time
 2. **IntelliSense**: Field suggestions in your IDE
 3. **Closure Support**: Use variables naturally
 4. **Cleaner Code**: More readable lambda syntax
-5. **Future Proof**: Will be the default in v2.0
+5. **WHERE IN Support**: Array membership with `.includes(array)`
+6. **Future Proof**: Will be the default in v2.0
 
 ### What's Changing in v2.0
 
