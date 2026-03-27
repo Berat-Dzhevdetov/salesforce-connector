@@ -161,6 +161,30 @@ export class TypedQueryBuilder<TModel, TResult> {
   }
 
   /**
+   * Execute the query and return the count of matching records
+   */
+  async count(): Promise<number> {
+    try {
+      let query = `SELECT COUNT() FROM ${this.objectName}`;
+
+      if (this.whereClause) {
+        query += ` WHERE ${this.whereClause}`;
+      }
+
+      const baseUrl = SalesforceConfig.getApiBaseUrl();
+      const encodedQuery = encodeURIComponent(query);
+      const url = `${baseUrl}/query?q=${encodedQuery}`;
+
+      const response = await SalesforceClient.get<SalesforceQueryResponse<any>>(url);
+
+      return response?.data?.totalSize || 0;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Count query execution failed: ${errorMessage}`);
+    }
+  }
+
+  /**
    * Executes the query and returns a paginated result
    */
   async paginate(page: number = 1, itemsPerPage: number = 20): Promise<PaginatedResponse<TResult>> {
@@ -175,6 +199,10 @@ export class TypedQueryBuilder<TModel, TResult> {
 
       // Calculate offset from page number (page is 1-based)
       const offset = (page - 1) * itemsPerPage;
+
+      // Get the actual total count with a separate COUNT() query
+      // This is necessary because Salesforce's totalSize with OFFSET only reflects the page size
+      const totalSize = await this.count();
 
       // Create a copy and set pagination
       const paginatedQuery = this.copy();
@@ -201,10 +229,14 @@ export class TypedQueryBuilder<TModel, TResult> {
       // Map records to result type
       const mappedRecords = records.map((record: any) => this.mapRecord(record));
 
+      // Calculate hasNextPage based on offset pagination
+      // There's a next page if: (current offset + items fetched) < total records
+      const hasNextPage = (offset + records.length) < totalSize;
+
       return {
         records: mappedRecords,
-        totalSize: response.data.totalSize || 0,
-        hasNextPage: !response.data.done
+        totalSize,
+        hasNextPage
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
