@@ -482,6 +482,10 @@ export class QueryBuilder<T = any> {
       // Calculate offset from page number (page is 1-based)
       const offset = (page - 1) * itemsPerPage;
 
+      // Get the actual total count with a separate COUNT() query
+      // This is necessary because Salesforce's totalSize with OFFSET only reflects the page size
+      const totalSize = await this.count();
+
       // Create a copy and set pagination
       const paginatedQuery = this.copy();
       paginatedQuery.limitValue = itemsPerPage;
@@ -509,10 +513,14 @@ export class QueryBuilder<T = any> {
         ? records.map((record: any) => new this.modelConstructor!(record))
         : records;
 
+      // Calculate hasNextPage based on offset pagination
+      // There's a next page if: (current offset + items fetched) < total records
+      const hasNextPage = (offset + records.length) < totalSize;
+
       return {
         records: mappedRecords,
-        totalSize: response.data.totalSize || 0,
-        hasNextPage: !response.data.done
+        totalSize,
+        hasNextPage
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
