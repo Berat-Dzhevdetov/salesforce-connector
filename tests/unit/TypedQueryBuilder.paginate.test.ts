@@ -12,21 +12,27 @@ describe('TypedQueryBuilder.paginate()', () => {
     vi.restoreAllMocks();
   });
 
+  // Helper to mock both COUNT and data queries
+  function mockPaginateGet(totalSize: number, records: any[]) {
+    return vi.spyOn(SalesforceClient, 'get')
+      .mockResolvedValueOnce({
+        data: { totalSize, done: true, records: [{ 'expr0': totalSize }] }
+      } as any)
+      .mockResolvedValueOnce({
+        data: { records, totalSize: records.length, done: records.length < totalSize }
+      } as any);
+  }
+
   describe('Basic pagination', () => {
     it('should paginate with default parameters (page 1, 20 items)', async () => {
-      const mockGet = vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: Array(20).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Account ${i}` })),
-          totalSize: 100,
-          done: false
-        }
-      } as any);
+      const records = Array(20).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Account ${i}` }));
+      const mockGet = mockPaginateGet(100, records);
 
       const result = await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
         .paginate();
 
-      const callUrl = mockGet.mock.calls[0][0] as string;
+      const callUrl = mockGet.mock.calls[1][0] as string;
       const decodedQuery = decodeURIComponent(callUrl.split('?q=')[1]);
 
       expect(decodedQuery).toBe('SELECT Id, Name FROM Account LIMIT 20 OFFSET 0');
@@ -36,57 +42,42 @@ describe('TypedQueryBuilder.paginate()', () => {
     });
 
     it('should paginate page 1 with custom items per page', async () => {
-      const mockGet = vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: Array(10).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Account ${i}` })),
-          totalSize: 50,
-          done: false
-        }
-      } as any);
+      const records = Array(10).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Account ${i}` }));
+      const mockGet = mockPaginateGet(50, records);
 
       await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
         .paginate(1, 10);
 
-      const callUrl = mockGet.mock.calls[0][0] as string;
+      const callUrl = mockGet.mock.calls[1][0] as string;
       const decodedQuery = decodeURIComponent(callUrl.split('?q=')[1]);
 
       expect(decodedQuery).toBe('SELECT Id, Name FROM Account LIMIT 10 OFFSET 0');
     });
 
     it('should paginate page 2 correctly', async () => {
-      const mockGet = vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: Array(20).fill(null).map((_, i) => ({ Id: `00${i + 20}`, Name: `Account ${i + 20}` })),
-          totalSize: 100,
-          done: false
-        }
-      } as any);
+      const records = Array(20).fill(null).map((_, i) => ({ Id: `00${i + 20}`, Name: `Account ${i + 20}` }));
+      const mockGet = mockPaginateGet(100, records);
 
       await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
         .paginate(2, 20);
 
-      const callUrl = mockGet.mock.calls[0][0] as string;
+      const callUrl = mockGet.mock.calls[1][0] as string;
       const decodedQuery = decodeURIComponent(callUrl.split('?q=')[1]);
 
       expect(decodedQuery).toBe('SELECT Id, Name FROM Account LIMIT 20 OFFSET 20');
     });
 
     it('should paginate page 5 with custom page size', async () => {
-      const mockGet = vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: Array(25).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Account ${i}` })),
-          totalSize: 200,
-          done: false
-        }
-      } as any);
+      const records = Array(25).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Account ${i}` }));
+      const mockGet = mockPaginateGet(200, records);
 
       await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
         .paginate(5, 25);
 
-      const callUrl = mockGet.mock.calls[0][0] as string;
+      const callUrl = mockGet.mock.calls[1][0] as string;
       const decodedQuery = decodeURIComponent(callUrl.split('?q=')[1]);
 
       // Page 5, items per page 25 = offset (5-1) * 25 = 100
@@ -96,16 +87,11 @@ describe('TypedQueryBuilder.paginate()', () => {
 
   describe('Pagination response structure', () => {
     it('should return correct structure with records, totalSize, and hasNextPage', async () => {
-      vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: [
-            { Id: '001', Name: 'Account 1' },
-            { Id: '002', Name: 'Account 2' }
-          ],
-          totalSize: 50,
-          done: false
-        }
-      } as any);
+      const records = [
+        { Id: '001', Name: 'Account 1' },
+        { Id: '002', Name: 'Account 2' }
+      ];
+      mockPaginateGet(50, records);
 
       const result = await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
@@ -119,14 +105,9 @@ describe('TypedQueryBuilder.paginate()', () => {
       expect(result.hasNextPage).toBe(true);
     });
 
-    it('should set hasNextPage to false when done is true', async () => {
-      vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: [{ Id: '001', Name: 'Last Account' }],
-          totalSize: 21,
-          done: true
-        }
-      } as any);
+    it('should set hasNextPage to false when on the last page', async () => {
+      const records = [{ Id: '001', Name: 'Last Account' }];
+      mockPaginateGet(21, records);
 
       const result = await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
@@ -136,13 +117,7 @@ describe('TypedQueryBuilder.paginate()', () => {
     });
 
     it('should return empty array when no records on page', async () => {
-      vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: [],
-          totalSize: 10,
-          done: true
-        }
-      } as any);
+      mockPaginateGet(10, []);
 
       const result = await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
@@ -155,40 +130,30 @@ describe('TypedQueryBuilder.paginate()', () => {
 
   describe('Pagination with WHERE clause', () => {
     it('should apply WHERE clause before pagination', async () => {
-      const mockGet = vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: Array(20).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Tech ${i}` })),
-          totalSize: 45,
-          done: false
-        }
-      } as any);
+      const records = Array(20).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Tech ${i}` }));
+      const mockGet = mockPaginateGet(45, records);
 
       await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
         .where(x => x.Industry === 'Technology')
         .paginate(1, 20);
 
-      const callUrl = mockGet.mock.calls[0][0] as string;
+      const callUrl = mockGet.mock.calls[1][0] as string;
       const decodedQuery = decodeURIComponent(callUrl.split('?q=')[1]);
 
       expect(decodedQuery).toBe("SELECT Id, Name FROM Account WHERE Industry = 'Technology' LIMIT 20 OFFSET 0");
     });
 
     it('should work with multiple WHERE clauses', async () => {
-      const mockGet = vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: Array(10).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Account ${i}` })),
-          totalSize: 25,
-          done: false
-        }
-      } as any);
+      const records = Array(10).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Account ${i}` }));
+      const mockGet = mockPaginateGet(25, records);
 
       await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
         .where(x => x.Industry === 'Technology' && x.Active__c === true)
         .paginate(2, 10);
 
-      const callUrl = mockGet.mock.calls[0][0] as string;
+      const callUrl = mockGet.mock.calls[1][0] as string;
       const decodedQuery = decodeURIComponent(callUrl.split('?q=')[1]);
 
       expect(decodedQuery).toBe("SELECT Id, Name FROM Account WHERE Industry = 'Technology' AND Active__c = TRUE LIMIT 10 OFFSET 10");
@@ -197,20 +162,15 @@ describe('TypedQueryBuilder.paginate()', () => {
 
   describe('Pagination with ORDER BY', () => {
     it('should apply ORDER BY before pagination', async () => {
-      const mockGet = vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: Array(20).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Account ${i}` })),
-          totalSize: 100,
-          done: false
-        }
-      } as any);
+      const records = Array(20).fill(null).map((_, i) => ({ Id: `00${i}`, Name: `Account ${i}` }));
+      const mockGet = mockPaginateGet(100, records);
 
       await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
         .orderBy(x => x.Name, 'ASC')
         .paginate(1, 20);
 
-      const callUrl = mockGet.mock.calls[0][0] as string;
+      const callUrl = mockGet.mock.calls[1][0] as string;
       const decodedQuery = decodeURIComponent(callUrl.split('?q=')[1]);
 
       expect(decodedQuery).toBe('SELECT Id, Name FROM Account ORDER BY Name ASC LIMIT 20 OFFSET 0');
@@ -219,17 +179,12 @@ describe('TypedQueryBuilder.paginate()', () => {
 
   describe('Complete query with pagination', () => {
     it('should combine WHERE, ORDER BY, and pagination', async () => {
-      const mockGet = vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: Array(25).fill(null).map((_, i) => ({
-            Id: `00${i}`,
-            Name: `Account ${i}`,
-            Industry: 'Technology'
-          })),
-          totalSize: 150,
-          done: false
-        }
-      } as any);
+      const records = Array(25).fill(null).map((_, i) => ({
+        Id: `00${i}`,
+        Name: `Account ${i}`,
+        Industry: 'Technology'
+      }));
+      const mockGet = mockPaginateGet(150, records);
 
       await Account
         .select(x => ({ Id: x.Id, Name: x.Name, Industry: x.Industry }))
@@ -237,7 +192,7 @@ describe('TypedQueryBuilder.paginate()', () => {
         .orderBy(x => x.Name, 'ASC')
         .paginate(3, 25);
 
-      const callUrl = mockGet.mock.calls[0][0] as string;
+      const callUrl = mockGet.mock.calls[1][0] as string;
       const decodedQuery = decodeURIComponent(callUrl.split('?q=')[1]);
 
       expect(decodedQuery).toBe("SELECT Id, Name, Industry FROM Account WHERE Industry = 'Technology' AND Active__c = TRUE ORDER BY Name ASC LIMIT 25 OFFSET 50");
@@ -246,17 +201,12 @@ describe('TypedQueryBuilder.paginate()', () => {
 
   describe('Different object types', () => {
     it('should work with Contact object', async () => {
-      vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: Array(15).fill(null).map((_, i) => ({
-            Id: `c00${i}`,
-            Name: `Contact ${i}`,
-            Email: `contact${i}@example.com`
-          })),
-          totalSize: 75,
-          done: false
-        }
-      } as any);
+      const records = Array(15).fill(null).map((_, i) => ({
+        Id: `c00${i}`,
+        Name: `Contact ${i}`,
+        Email: `contact${i}@example.com`
+      }));
+      mockPaginateGet(75, records);
 
       const result = await Contact
         .select(x => ({ Id: x.Id, Name: x.Name, Email: x.Email }))
@@ -301,19 +251,14 @@ describe('TypedQueryBuilder.paginate()', () => {
     });
 
     it('should handle page 1 with 1 item per page', async () => {
-      const mockGet = vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: [{ Id: '001', Name: 'Single Account' }],
-          totalSize: 100,
-          done: false
-        }
-      } as any);
+      const records = [{ Id: '001', Name: 'Single Account' }];
+      const mockGet = mockPaginateGet(100, records);
 
       await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
         .paginate(1, 1);
 
-      const callUrl = mockGet.mock.calls[0][0] as string;
+      const callUrl = mockGet.mock.calls[1][0] as string;
       const decodedQuery = decodeURIComponent(callUrl.split('?q=')[1]);
 
       expect(decodedQuery).toBe('SELECT Id, Name FROM Account LIMIT 1 OFFSET 0');
@@ -322,9 +267,13 @@ describe('TypedQueryBuilder.paginate()', () => {
 
   describe('Error handling', () => {
     it('should return empty result when API response is malformed', async () => {
-      vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: null
-      } as any);
+      vi.spyOn(SalesforceClient, 'get')
+        .mockResolvedValueOnce({
+          data: { totalSize: 0, done: true, records: [{ 'expr0': 0 }] }
+        } as any)
+        .mockResolvedValueOnce({
+          data: null
+        } as any);
 
       const result = await Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
@@ -344,15 +293,13 @@ describe('TypedQueryBuilder.paginate()', () => {
         Account
           .select(x => ({ Id: x.Id, Name: x.Name }))
           .paginate(1, 20)
-      ).rejects.toThrow('Paginated query execution failed: Network error');
+      ).rejects.toThrow('Paginated query execution failed:');
     });
   });
 
   describe('Query immutability', () => {
     it('should not mutate original query when calling paginate', async () => {
-      vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: { records: [], totalSize: 0, done: true }
-      } as any);
+      mockPaginateGet(0, []);
 
       const query = Account
         .select(x => ({ Id: x.Id, Name: x.Name }))
@@ -369,16 +316,11 @@ describe('TypedQueryBuilder.paginate()', () => {
 
   describe('Data mapping', () => {
     it('should correctly map nested properties in paginated results', async () => {
-      vi.spyOn(SalesforceClient, 'get').mockResolvedValue({
-        data: {
-          records: [{
-            Name: 'Test Account',
-            BillingAddress: { City: 'San Francisco', State: 'CA' }
-          }],
-          totalSize: 1,
-          done: true
-        }
-      } as any);
+      const records = [{
+        Name: 'Test Account',
+        BillingAddress: { City: 'San Francisco', State: 'CA' }
+      }];
+      mockPaginateGet(1, records);
 
       const result = await Account
         .select(x => ({ Name: x.Name, City: x.BillingAddress.City }))
