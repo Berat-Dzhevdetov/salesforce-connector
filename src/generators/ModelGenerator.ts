@@ -143,31 +143,12 @@ export class ModelGenerator {
       const fieldType = this.mapFieldType(field);
 
       // For LambdaModel, getters return the actual type (not undefined)
-      // with a fallback to default value
-      let defaultValue: string;
-      switch (fieldType) {
-        case 'string':
-          defaultValue = "''";
-          break;
-        case 'number':
-          defaultValue = '0';
-          break;
-        case 'boolean':
-          defaultValue = 'false';
-          break;
-        case 'Date':
-          defaultValue = 'new Date()';
-          break;
-        default:
-          defaultValue = 'undefined as any';
-      }
-
       // Getter only (no setters for LambdaModel - use .set() method instead)
       if (includeComments && field.label) {
         code += `  /** ${field.label} */\n`;
       }
-      code += `  get ${field.name}(): ${fieldType} {\n`;
-      code += `    return this.get('${field.name}') || ${defaultValue};\n`;
+      code += `  get ${field.name}(): ${fieldType} | undefined {\n`;
+      code += `    return this.get('${field.name}');\n`;
       code += `  }\n\n`;
     }
 

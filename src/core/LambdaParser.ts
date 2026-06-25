@@ -39,8 +39,10 @@ export class LambdaParser {
   private project: Project;
   // Store captured WHERE functions from subqueries for closure variable access
   private capturedWhereFunctions: Map<string, Function> = new Map();
+  private dateFields: string[];
+  private dateTimeFields: string[];
 
-  constructor() {
+  constructor(dateFields: string[] = [], dateTimeFields: string[] = []) {
     this.project = new Project({
       useInMemoryFileSystem: true,
       compilerOptions: {
@@ -48,6 +50,8 @@ export class LambdaParser {
         strict: false
       },
     });
+    this.dateFields = dateFields;
+    this.dateTimeFields = dateTimeFields;
   }
 
   /**
@@ -835,6 +839,11 @@ export class LambdaParser {
           return null;
         }
 
+        // Handle Date objects - Inspector gives description as ISO string
+        if (subtype === 'date' && description) {
+          return new Date(description);
+        }
+
         // Handle arrays by fetching their elements
         if (subtype === 'array' && objectId && session) {
           return this.extractArrayFromInspector(session, objectId);
@@ -1414,7 +1423,7 @@ export class LambdaParser {
    */
   private conditionToSOQL(node: ConditionNode): string {
     if (node.kind === "leaf") {
-      const val = this.formatValueForSOQL(node.value, node.operator);
+      const val = this.formatValueForSOQL(node.value, node.operator, node.field);
       return `${node.field} ${node.operator} ${val}`;
     }
 
@@ -1437,7 +1446,7 @@ export class LambdaParser {
   /**
    * Formats a value for SOQL
    */
-  private formatValueForSOQL(value: unknown, operator?: Operator): string {
+  private formatValueForSOQL(value: unknown, operator?: Operator, fieldName?: string): string {
     if (value === null || value === undefined) {
       return 'NULL';
     }
@@ -1460,7 +1469,28 @@ export class LambdaParser {
       return str;
     }
 
+    if (value instanceof Date) {
+      const isDateOnly = fieldName ? this.dateFields.includes(fieldName) : false;
+      if (isDateOnly) {
+        return value.toISOString().split('T')[0];
+      }
+      return value.toISOString();
+    }
+
     if (typeof value === 'string') {
+      const isDateField = fieldName ? this.dateFields.includes(fieldName) : false;
+      const isDateTimeField = fieldName ? this.dateTimeFields.includes(fieldName) : false;
+
+      if (isDateField || isDateTimeField) {
+        const hasTimeComponent = value.includes('T');
+        if (hasTimeComponent) {
+          if (!value.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(value)) {
+            return `${value}Z`;
+          }
+        }
+        return value;
+      }
+
       return `'${value.replace(/'/g, "\\'")}'`;
     }
 

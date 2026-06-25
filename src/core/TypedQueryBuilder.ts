@@ -26,12 +26,12 @@ export class TypedQueryBuilder<TModel, TResult> {
     dateFields?: string[],
     dateTimeFields?: string[]
   ) {
-    this.parser = new LambdaParser();
+    this.dateFields = dateFields || [];
+    this.dateTimeFields = dateTimeFields || [];
+    this.parser = new LambdaParser(this.dateFields, this.dateTimeFields);
     this.objectName = objectName;
     this.fieldMap = fieldMap;
     this.modelConstructor = modelConstructor;
-    this.dateFields = dateFields || [];
-    this.dateTimeFields = dateTimeFields || [];
   }
 
   /**
@@ -47,7 +47,8 @@ export class TypedQueryBuilder<TModel, TResult> {
    * - OR conditions: .where(x => x.A === 'a' || x.B === 'b')
    */
   where(condition: (x: SOQLProxy<TModel>) => boolean): this {
-    const newCondition = this.parser.parseWhere(condition);
+    const rawCondition = this.parser.parseWhere(condition);
+    const newCondition = this.fixDateFields(rawCondition);
 
     if (this.whereClause) {
       this.whereClause = `${this.whereClause} AND ${newCondition}`;
@@ -56,6 +57,44 @@ export class TypedQueryBuilder<TModel, TResult> {
     }
 
     return this;
+  }
+
+  /**
+   * Fixes date/datetime field values in a WHERE clause string:
+   * - Removes quotes so Salesforce treats them as date literals
+   * - Converts locale date strings (from Inspector) to ISO format
+   * - Appends Z to datetime strings that are missing a timezone suffix
+   */
+  private fixDateFields(clause: string): string {
+    const allDateFields = [...this.dateFields, ...this.dateTimeFields];
+    if (allDateFields.length === 0) return clause;
+
+    let result = clause;
+    for (const field of allDateFields) {
+      const isDateOnly = this.dateFields.includes(field);
+      const isDateTime = this.dateTimeFields.includes(field);
+      const pattern = new RegExp(`(\\b${field}\\s*(?:=|!=|<|>|<=|>=)\\s*)'([^']+)'`, 'g');
+      result = result.replace(pattern, (_match, operator, value) => {
+        const isISODate = /^\d{4}-\d{2}-\d{2}(T[\d:.Z+-]*)?$/.test(value);
+        if (isISODate) {
+          // Already ISO-formatted — strip quotes and append Z if datetime is missing timezone
+          if (isDateTime && value.includes('T') && !value.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(value)) {
+            return `${operator}${value}Z`;
+          }
+          return `${operator}${value}`;
+        }
+        // Non-ISO string (e.g. locale date from Inspector): parse and reformat
+        const parsed = new Date(value);
+        if (!isNaN(parsed.getTime())) {
+          if (isDateOnly) {
+            return `${operator}${parsed.toISOString().split('T')[0]}`;
+          }
+          return `${operator}${parsed.toISOString()}`;
+        }
+        return `${operator}${value}`;
+      });
+    }
+    return result;
   }
 
   /**

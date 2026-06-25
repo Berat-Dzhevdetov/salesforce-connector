@@ -11,9 +11,9 @@
 export type SOQLField<T> = T & {
   /**
    * For string pattern matching: field.includes(searchString) → LIKE '%searchString%'
-   * For array membership: field.includes([val1, val2]) → IN (val1, val2)
+   * For array membership: field.includes([val1, val2]) → IN ('val1', 'val2')
    */
-  includes(searchValue: T | T[] | any[]): boolean;
+  includes(searchValue: T extends string ? string | string[] : T | T[]): boolean;
 
   /**
    * String pattern matching: field.startsWith(prefix) → LIKE 'prefix%'
@@ -31,9 +31,9 @@ export type SOQLField<T> = T & {
  * This allows lambda parameters to have the includes/startsWith/endsWith methods
  */
 export type SOQLProxy<T> = {
-  [K in keyof T]: T[K] extends string | number | boolean
-    ? SOQLField<T[K]>
-    : T[K] extends object
-    ? SOQLProxy<T[K]>
+  [K in keyof T as T[K] extends (...args: any[]) => any ? never : K]: NonNullable<T[K]> extends string | number | boolean
+    ? SOQLField<NonNullable<T[K]>>
+    : NonNullable<T[K]> extends object
+    ? SOQLProxy<NonNullable<T[K]>>
     : T[K];
 };
