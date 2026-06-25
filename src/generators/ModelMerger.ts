@@ -272,9 +272,13 @@ export class ModelMerger {
       const body = member.body;
       if (body && body.statements.length === 1) {
         const statement = body.statements[0];
-        // Check if it's a simple return this.get('FieldName') pattern
+        // Check if it's a simple return this.get('FieldName') or this.get('FieldName') || default pattern
         if (ts.isReturnStatement(statement) && statement.expression) {
-          const expr = statement.expression;
+          let expr = statement.expression;
+          // Unwrap binary expression (e.g. this.get('X') || '')
+          if (ts.isBinaryExpression(expr)) {
+            expr = expr.left;
+          }
           if (ts.isCallExpression(expr) && ts.isPropertyAccessExpression(expr.expression)) {
             if (expr.expression.name.text === 'get') {
               return true; // Generated getter
@@ -365,7 +369,7 @@ export class ModelMerger {
     // Inject custom imports after the base import
     const customImports = customSections.filter(s => s.type === 'import');
     if (customImports.length > 0) {
-      const baseImport = "import { Model } from 'javascript-salesforce-connector';";
+      const baseImport = "import { LambdaModel } from 'javascript-salesforce-connector';";
       const importCode = customImports.map(s => s.code).join('\n');
       code = code.replace(baseImport, `${baseImport}\n${importCode}`);
     }
@@ -391,8 +395,8 @@ export class ModelMerger {
     if (customMembers.length > 0) {
       const customCode = customMembers.map(s => `  ${s.code}`).join('\n\n');
 
-      // Find the last closing brace of the class
-      const classPattern = new RegExp(`export class ${className} extends Model<${className}Data> \\{[\\s\\S]*?\\n\\}`, 'g');
+      // Find the last closing brace of the class (greedy match to capture the full class body)
+      const classPattern = new RegExp(`export class ${className} extends LambdaModel<${className}Data> \\{[\\s\\S]*?\\n\\}`);
       code = code.replace(classPattern, (match) => {
         // Insert custom code before the closing brace
         return match.replace(/\n\}$/, `\n\n  // Custom code preserved from previous scaffold\n${customCode}\n}`);

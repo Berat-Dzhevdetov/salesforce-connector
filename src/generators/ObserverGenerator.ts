@@ -160,7 +160,7 @@ export class ${observerName} implements Observer<${modelName}> {
    */
   async beforeCreate(instance: ${modelName}): Promise<void> {
     // TODO: Add validation or modification logic
-    console.log('beforeCreate:', instance.getId());
+    console.log('beforeCreate', instance.getId());
   }
 
   /**
@@ -171,7 +171,7 @@ export class ${observerName} implements Observer<${modelName}> {
    */
   async afterCreate(instance: ${modelName}): Promise<void> {
     // TODO: Add post-creation logic
-    console.log('afterCreate:', instance.getId());
+    console.log('afterCreate', instance.getId());
   }
 
   /**
@@ -184,7 +184,7 @@ export class ${observerName} implements Observer<${modelName}> {
    */
   async beforeUpdate(instance: ${modelName}, changes: any): Promise<void> {
     // TODO: Add validation or modification logic
-    console.log('beforeUpdate:', instance.getId(), changes);
+    console.log('beforeUpdate', instance.getId(), changes);
   }
 
   /**
@@ -196,7 +196,7 @@ export class ${observerName} implements Observer<${modelName}> {
    */
   async afterUpdate(instance: ${modelName}, changes: any): Promise<void> {
     // TODO: Add post-update logic
-    console.log('afterUpdate:', instance.getId(), changes);
+    console.log('afterUpdate', instance.getId(), changes);
   }
 
   /**
@@ -209,7 +209,7 @@ export class ${observerName} implements Observer<${modelName}> {
    */
   async beforeSave(instance: ${modelName}, isNew: boolean): Promise<void> {
     // TODO: Add common validation logic
-    console.log('beforeSave:', instance.getId(), 'isNew:', isNew);
+    console.log('beforeSave', instance.getId(), 'isNew:', isNew);
   }
 
   /**
@@ -221,7 +221,7 @@ export class ${observerName} implements Observer<${modelName}> {
    */
   async afterSave(instance: ${modelName}, isNew: boolean): Promise<void> {
     // TODO: Add common post-save logic
-    console.log('afterSave:', instance.getId(), 'isNew:', isNew);
+    console.log('afterSave', instance.getId(), 'isNew:', isNew);
   }
 
   /**
@@ -233,7 +233,7 @@ export class ${observerName} implements Observer<${modelName}> {
    */
   async beforeDelete(instance: ${modelName}): Promise<void> {
     // TODO: Add deletion validation or cleanup logic
-    console.log('beforeDelete:', instance.getId());
+    console.log('beforeDelete', instance.getId());
   }
 
   /**
@@ -244,7 +244,7 @@ export class ${observerName} implements Observer<${modelName}> {
    */
   async afterDelete(instance: ${modelName}): Promise<void> {
     // TODO: Add post-deletion logic
-    console.log('afterDelete:', instance.getId());
+    console.log('afterDelete', instance.getId());
   }
 }
 `;
